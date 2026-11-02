@@ -22,6 +22,12 @@
 
 建议使用 `npm ci` 配合 npm lock，避免交替更新两种锁文件。包发布白名单包含构建产物、bundle patch、README、许可证与分析脚本，不包含测试、原始会话或调试捕获。`prepack` 自动构建；预发布默认 `next` tag。确认版本未占用后由维护者执行 `npm publish`；已发布版本不能覆盖。
 
+## 作为 skill 分发（其他 agent 工具）
+
+[`skills/batch-tool-calls/SKILL.md`](skills/batch-tool-calls/SKILL.md) 把规则直接写进 `description`：skill 目录里只有这一行描述常驻上下文，因此核心规则无需模型主动加载 skill 就可见；正文是同一规则的展开。复制该目录到支持 skill 的 agent 的 skills 目录即可。
+
+边界：描述在目录中可能被截断，规则放在最前面；是否遵循取决于模型与工具对 skill 目录的处理，尚未在 DSH 之外验证。不支持 skill 的工具，可把正文复制进 `AGENTS.md` / `CLAUDE.md` 等常驻指令文件。
+
 ## 开发与安装
 
 尚未发布 npm；已在本地 Web profile 链接安装并进行人工观察。一次探索任务出现连续多调用批次，但模型同时发生切换，不能据此归因于插件或宣称 token/费用节省。

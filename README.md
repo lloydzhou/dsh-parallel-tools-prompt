@@ -44,6 +44,8 @@ contextReminder: true
 presetIds: [standard]
 ```
 
+**注意：profile 的 `cordis.patch.yml` 覆盖本插件时，`config` 是整体替换、不与 bundle 默认值深合并。** 覆盖项必须写全需要的字段（至少 `enabled: true`、`presetIds`），否则 `enabled` 回落为默认 `false`，插件静默不注入。验收方式：新会话的 `system/message` 中应出现 `Tool-call scheduling:`。
+
 `presetIds` 是精确ID列表，不是正则。自定义目标仅适用于原生工具调用preset；不要把PTC加入以免对专用执行模式施加不合适的指导。根会话fork可以保留历史parentSession，不会仅因此被当作子智能体。
 
 卸载会释放注册；已有模型历史中的旧指令不会被改写或删除。若宿主需要重新投影系统提示，生效边界由宿主管理；稳妥方式是重启后继续原会话。首次安装可能改变system前缀并影响一次缓存复用；不能保证零缓存影响。

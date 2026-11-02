@@ -1,0 +1,9 @@
+# Installing/enabling this bundle is the explicit opt-in. Direct plugin use
+# defaults to enabled:false. No preset replacement or scheduler changes.
+- insert:
+    - id: parallel-tools-prompt
+      name: dsh-parallel-tools-prompt
+      config:
+        enabled: true
+        contextReminder: true
+        presetIds: [standard]

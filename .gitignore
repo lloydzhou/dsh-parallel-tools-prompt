@@ -1,0 +1,14 @@
+node_modules/
+lib/
+*.tgz
+coverage/
+*-HANDOFF.md
+# Local investigation notes and private captures are not project deliverables.
+docs/DEBUG*
+docs/VALIDATION.md
+*.log
+.env
+.env.*
+captures/
+.debug/
+.DS_Store

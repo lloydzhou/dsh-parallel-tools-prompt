@@ -8,7 +8,7 @@ import z from '@deepseek-ai/schemastery';
 import { PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from './prompt.js';
 import { installPromptDebug } from './debug.js';
 
-export { PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from './prompt.js';
+export { BATCH_RULE, PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from './prompt.js';
 
 export const name = 'parallel-tools-prompt';
 export const inject = ['agents', 'systemPrompt', 'sessionProjections'];

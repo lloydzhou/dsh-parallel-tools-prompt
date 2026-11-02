@@ -2,8 +2,8 @@
 export const SECTION_NAME = 'parallel-tools:guidance';
 export const SECTION_ORDER = 1050;
 
-export const PARALLEL_TOOLS_PROMPT = `Tool-call scheduling:
-- Before each response, briefly check what else the current subgoal already has ready: same-tool calls on different targets, parallel reads, independent searches and checks. Issue every ready, independent call together in THIS response.
-- Hold a call only when its arguments depend on an earlier result, or ordering is required (read-before-edit, shared file, approval flow). A later combined decision does not make independent collection sequential.
-- A single call is correct when nothing else is ready; never invent or duplicate calls to fill a batch. Keep scheduling internal: no planning-only turn, no shell wrappers or delegation just to simulate batching.
-- Several calls in one response do not force simultaneous execution; the host scheduler, permissions, and all safety rules still apply.`;
+/** Single source of truth: also the description of skills/batch-tool-calls/SKILL.md (a test keeps them identical). */
+export const BATCH_RULE = `Before every response that uses tools, (1) list what the current subgoal already has ready, (2) issue ALL ready, independent calls together in one response (parallel reads, searches, checks), (3) split only for real dependencies (needs an earlier result, read-before-edit, shared-file or approval order). One call per response wastes a model round trip; a single call is fine when nothing else is ready, so never invent calls to fill a batch. No planning-only turn, no shell wrappers or delegation to simulate batching.`;
+
+/** The "Tool-call scheduling:" prefix is the verification marker searched for in system/message. */
+export const PARALLEL_TOOLS_PROMPT = `Tool-call scheduling: ${BATCH_RULE}`;

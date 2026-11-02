@@ -312,3 +312,14 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     expect(await reloaded.guidance()).toEqual([expectedSection]);
   });
 });
+
+describe('skill distribution', () => {
+  it('keeps the SKILL.md description identical to the shared rule and within spec limits', async () => {
+    const { readFileSync } = await import('node:fs');
+    const text = readFileSync(new URL('../skills/batch-tool-calls/SKILL.md', import.meta.url), 'utf8');
+    const description = /^description: "(.*)"$/m.exec(text)?.[1];
+    expect(description).toBe(plugin.BATCH_RULE);
+    expect(plugin.BATCH_RULE.length).toBeLessThanOrEqual(1024);
+    expect(plugin.PARALLEL_TOOLS_PROMPT.startsWith('Tool-call scheduling: ')).toBe(true);
+  });
+});

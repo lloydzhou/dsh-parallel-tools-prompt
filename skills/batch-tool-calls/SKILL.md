@@ -1,6 +1,6 @@
 ---
 name: batch-tool-calls
-description: Every response with tool use - issue ALL ready, independent tool calls together in one response (parallel reads, searches, checks); one call per response wastes round trips. Hold a call only for real dependencies.
+description: "Before every response that uses tools, (1) list what the current subgoal already has ready, (2) issue ALL ready, independent calls together in one response (parallel reads, searches, checks), (3) split only for real dependencies (needs an earlier result, read-before-edit, shared-file or approval order). One call per response wastes a model round trip; a single call is fine when nothing else is ready, so never invent calls to fill a batch. No planning-only turn, no shell wrappers or delegation to simulate batching."
 ---
 
 # Batch ready tool calls

@@ -226,6 +226,15 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     expect(message.content[0]?.text).toContain('independent tool calls together');
   });
 
+  it('systemPromptSection:false keeps the reminder but registers no system section', async () => {
+    const f = await fixture();
+    const agent = f.agent();
+    await agent.created();
+    await f.load({ enabled: true, systemPromptSection: false, contextReminder: true }).inertia;
+    expect(await agent.guidance()).toEqual([]);
+    expect(agent.inject).toHaveBeenCalledTimes(1);
+  });
+
   it('skips the reminder when disabled or when the session already carries the marker', async () => {
     const disabled = await fixture();
     const off = disabled.agent();

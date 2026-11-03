@@ -25,6 +25,9 @@ export const Config = z.object({
   enabled: z.boolean().default(false).description(
     'Enable static tool-call scheduling guidance. The bundle explicitly opts in; direct plugin use is disabled by default.',
   ),
+  systemPromptSection: z.boolean().default(true).description(
+    'Register the static scheduling guidance section in the system prompt (default true). Set false to rely on contextReminder alone.',
+  ),
   contextReminder: z.boolean().default(false).description(
     'Additionally inject a one-time scheduling reminder as model-facing conversation context at the next step boundary. Persists in the session transcript; survives reloads without duplication.',
   ),
@@ -84,15 +87,15 @@ function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<strin
   // Returning the disposer is essential: ctx.effect does not implicitly adopt
   // arbitrary registrations executed inside its callback on another fiber.
   registration.release = agent.ctx.effect(() => {
-    const disposeSection = agent.ctx.systemPrompt.section({
+    const disposeSection = config.systemPromptSection ? agent.ctx.systemPrompt.section({
       name: SECTION_NAME,
       order: SECTION_ORDER,
       interpolate: false,
       text: PARALLEL_TOOLS_PROMPT,
-    });
+    }) : undefined;
     return () => {
       try {
-        return disposeSection();
+        return disposeSection?.();
       } finally {
         registrations.delete(agent);
         active.delete(registration);

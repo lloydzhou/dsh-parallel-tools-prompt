@@ -5,6 +5,7 @@ import type {} from '@deepseek-ai/dsh-session-projection';
 import type {} from '@deepseek-ai/dsh-system-prompt';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import z from '@deepseek-ai/schemastery';
+import type { Volatile } from '@deepseek-ai/cordis';
 import { PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from './prompt.js';
 import { installPromptDebug } from './debug.js';
 
@@ -40,10 +41,10 @@ export const Config = z.object({
   enabled: z.boolean().default(false).description(
     'Enable static tool-call scheduling guidance. The bundle explicitly opts in; direct plugin use is disabled by default.',
   ),
-  systemPromptSection: z.boolean().default(true).description(
+  systemPromptSection: z.boolean().default(true).volatile().description(
     'Inject the static scheduling guidance as a system-prompt section (default true). May be combined with contextReminder; with both off the plugin injects nothing.',
   ),
-  contextReminder: z.boolean().default(false).description(
+  contextReminder: z.boolean().default(false).volatile().description(
     'Inject a one-time scheduling reminder as a CONTEXT message at the next step boundary (default false). Persists in the session transcript; never duplicated across reloads. Independent of systemPromptSection.',
   ),
   presetIds: z.array(z.string().pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/))
@@ -53,6 +54,11 @@ export const Config = z.object({
 });
 
 export type Config = ReturnType<typeof Config>;
+
+/** Read a switch live: volatile fields are references whose value may change without a reload. */
+function flag(value: boolean | Volatile<boolean>): boolean {
+  return typeof value === 'boolean' ? value : value.get();
+}
 
 type Registration = { release?: () => void | Promise<void> };
 
@@ -75,18 +81,20 @@ function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<strin
 
   // Conversation-level reminder: appended by the pre-step listener below once
   // this agent is eligible (agent.inject only accepts user-kind messages).
-  if (config.contextReminder) reminderAgents.add(agent);
+  reminderAgents.add(agent);
 
   const registration: Registration = {};
   // Returning the disposer is essential: ctx.effect does not implicitly adopt
   // arbitrary registrations executed inside its callback on another fiber.
   registration.release = agent.ctx.effect(() => {
-    const disposeSection = config.systemPromptSection ? agent.ctx.systemPrompt.section({
+    // Registered unconditionally; the text is resolved at assembly time, so the
+    // switch applies the next time the host assembles a system prompt.
+    const disposeSection = agent.ctx.systemPrompt.section({
       name: SECTION_NAME,
       order: SECTION_ORDER,
       interpolate: false,
-      text: PARALLEL_TOOLS_PROMPT,
-    }) : undefined;
+      text: () => (flag(config.systemPromptSection) ? PARALLEL_TOOLS_PROMPT : ''),
+    });
     return () => {
       try {
         return disposeSection?.();
@@ -124,12 +132,12 @@ export function apply(ctx: Context, config: Config): void {
   // Same channel the host's own context plugins (e.g. time-context) use: after
   // downstream listeners accept the step, append one sourced message to the
   // step's messages; the host persists it and renders it as a CONTEXT block.
-  if (config.contextReminder) {
+  {
     const delivered = new WeakSet<Agent>();
     ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
       const decision = await next();
       if (decision.kind === 'reject' || signal.aborted) return decision;
-      if (!reminderAgents.has(agent) || delivered.has(agent)) return decision;
+      if (!flag(config.contextReminder) || !reminderAgents.has(agent) || delivered.has(agent)) return decision;
       const present = hasReminder(agent) || decision.messages.some(m => m.source.kind === CONTEXT_SOURCE_KIND);
       delivered.add(agent);
       if (present) return decision;

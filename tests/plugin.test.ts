@@ -39,7 +39,7 @@ async function fixture() {
   const agentHost = ctx.plugin({ inject: ['systemPrompt'], apply() {} });
   await agentHost.inertia;
 
-  function load(config: Partial<plugin.Config> = {}) {
+  function load(config: Record<string, unknown> = {}) {
     return ctx.plugin(plugin, config);
   }
 
@@ -256,7 +256,8 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     const agent = f.agent();
     await agent.created();
     await f.load({ enabled: true, systemPromptSection: false, contextReminder: true }).inertia;
-    expect(await agent.guidance()).toEqual([]);
+    // Registered but empty: renders nothing in the system prompt.
+    expect(renderPrompt(await agent.assemble())).toBe('');
     expect((await agent.preStep()).messages).toHaveLength(1);
   });
 

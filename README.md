@@ -11,6 +11,7 @@
 - 固定 section 名称 `parallel-tools:guidance`、order 1050、禁止插值；不注入时间戳、工具列表或每轮变化的数据。
 - 同一 Agent 幂等注册；插件卸载与 Agent 释放都清理 section。插件重载时为仍存活的目标根 Agent 补挂 section；源码更新建议重启宿主加载新模块。
 - 两个独立开关选择注入通道（默认只走系统提示词）：`systemPromptSection`（默认 `true`，注册 `systemPrompt.section()`）与 `contextReminder`（默认 `false`）。后者通过 `agent/pre-step` 在下一步骤追加一条带独立 `source.kind: parallel-tools-scheduling` 的 CONTEXT 提醒，写入会话历史并渲染为 CONTEXT 块，与宿主 `time-context` 同一机制；已持久化的 source 用于避免重复注入，每个 Agent 只交付一次。两者可同时开启；同时关闭则插件不注入任何内容。提醒进入历史，卸载不会删除。这不是每轮重复提醒，也不保证长期遵循。
+- 插件详情页（Plugins → 本插件）在描述与组件列表之间提供这两个开关的设置表单，开关即时写入当前 profile 的 patch。两个字段声明为 `.volatile()`，修改不重启插件：`contextReminder` 在下一步骤生效；系统提示词开关对修改之后重新组装提示词的会话生效（已建立的会话沿用旧提示词）。浏览器端由 `src/client` 经 `scripts/build-client.mjs` 构建为 `lib/client.js`，按宿主客户端模块格式封装；表单要求 profile 里条目 id 为 `parallel-tools-prompt`。
 - 单次调用合理时仍单次；路径、ID等参数必须已知；读后写、共享文件冲突、权限审批保持依赖顺序。不发明batch工具或额外规划轮次。
 - 同轮多个工具调用不代表真正同时执行；执行并发仍由DSH调度器决定。
 

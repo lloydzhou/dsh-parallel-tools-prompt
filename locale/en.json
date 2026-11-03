@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Parallel tools prompt",
+    "description": "Plan ready tool-call batches to reduce model round trips in DeepSeek Harness"
+  }
+}

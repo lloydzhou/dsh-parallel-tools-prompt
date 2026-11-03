@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "并行工具调用提示",
+    "description": "引导模型把已就绪的工具调用合并为一批，减少 DeepSeek Harness 中的模型往返次数"
+  }
+}

@@ -17,6 +17,16 @@ export const inject = ['agents', 'systemPrompt', 'sessionProjections'];
 export const CONTEXT_MARKER = '[parallel-tools:scheduling-v2]';
 export const CONTEXT_REMINDER = `${CONTEXT_MARKER} Every response: before answering, check what else the current subgoal already has ready and issue ALL ready, independent tool calls together in this one response — same-tool calls on different targets, parallel reads, independent searches and checks. Each response is one model round trip; issuing ready work one call at a time spends one round trip per call. Hold a call only for real dependencies: its arguments need an earlier result, read-before-edit, shared-file or approval ordering. A single call is fine when nothing else is ready; never invent calls to fill a batch.`;
 
+
+export const CONTEXT_SOURCE_KIND = 'parallel-tools-scheduling';
+
+/** True when the session transcript already carries our sourced reminder. */
+function hasReminder(agent: Agent): boolean {
+  return agent.session.snapshotEvents().some(event =>
+    event.type === 'user/message'
+    && (event.data as { source?: { kind?: string } } | undefined)?.source?.kind === CONTEXT_SOURCE_KIND);
+}
+
 export const Config = z.object({
   debugEnabled: z.boolean().default(false).description('Capture normalized LLM system prompts locally, only with an explicit session and enable sentinel. Sensitive: disable after diagnosis.'),
   debugSessionId: z.string().default(''),
@@ -47,7 +57,7 @@ type Registration = { release?: () => void | Promise<void> };
  * reload-time catch-up, so a plugin reload cannot silently drop guidance from
  * agents that survive it (the old instance's disposal removed its sections).
  */
-function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<string>, registrations: WeakMap<Agent, Registration>, active: Set<Registration>): void {
+function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<string>, registrations: WeakMap<Agent, Registration>, active: Set<Registration>, reminderAgents: WeakSet<Agent>): void {
   if (registrations.has(agent)) return;
   const { header } = agent.session;
   // Durable child metadata survives resume; live ownership covers children
@@ -58,30 +68,9 @@ function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<strin
     ?? header.agentPreset;
   if (preset === undefined || !presetIds.has(preset)) return;
 
-  // Conversation-level reminder: rides model-facing context at the nearest step
-  // boundary and persists in the transcript, so it stays proximal to generation.
-  // The transcript scan keeps reloads from stacking duplicate reminders.
-  if (config.contextReminder) {
-    try {
-      const already = agent.session.snapshotEvents().some(event => {
-        if (event.type !== 'user/message') return false;
-        const content = (event.data as { content?: readonly { type?: string; text?: unknown }[] } | undefined)?.content;
-        const text = Array.isArray(content) ? content.find(part => part?.type === 'text')?.text : undefined;
-        // Prefix match only: a compaction summary quoting the marker must not
-        // suppress a genuine reminder injection.
-        return typeof text === 'string' && text.trimStart().startsWith(CONTEXT_MARKER);
-      });
-      if (!already) {
-        agent.inject(createUserMessage({
-          content: [{ type: 'text', text: CONTEXT_REMINDER }],
-          // runtime-context renders as a CONTEXT block, not a fake user bubble.
-          // The kind is registered by the host at runtime (merge-extensible
-          // MessageSourceMap), so it is not visible to this package's types.
-          source: { kind: 'runtime-context', form: 'notice', summary: 'Parallel tool-call scheduling reminder' } as unknown as MessageSource,
-        }));
-      }
-    } catch { /* reminder must never break attach */ }
-  }
+  // Conversation-level reminder: appended by the pre-step listener below once
+  // this agent is eligible (agent.inject only accepts user-kind messages).
+  if (config.contextReminder) reminderAgents.add(agent);
 
   const registration: Registration = {};
   // Returning the disposer is essential: ctx.effect does not implicitly adopt
@@ -117,6 +106,7 @@ export function apply(ctx: Context, config: Config): void {
   const presetIds = new Set(config.presetIds);
   const registrations = new WeakMap<Agent, Registration>();
   const active = new Set<Registration>();
+  const reminderAgents = new WeakSet<Agent>();
 
   // Agent contexts are not children of this plugin's fiber. Explicitly give the
   // plugin ownership of their effect disposers as well as agent-local ownership.
@@ -125,8 +115,31 @@ export function apply(ctx: Context, config: Config): void {
     active.clear();
   });
 
+
+  // Same channel the host's own context plugins (e.g. time-context) use: after
+  // downstream listeners accept the step, append one sourced message to the
+  // step's messages; the host persists it and renders it as a CONTEXT block.
+  if (config.contextReminder) {
+    const delivered = new WeakSet<Agent>();
+    ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
+      const decision = await next();
+      if (decision.kind === 'reject' || signal.aborted) return decision;
+      if (!reminderAgents.has(agent) || delivered.has(agent)) return decision;
+      const present = hasReminder(agent) || decision.messages.some(m => (m.source?.kind as string | undefined) === CONTEXT_SOURCE_KIND);
+      delivered.add(agent);
+      if (present) return decision;
+      return {
+        ...decision,
+        messages: [...decision.messages, createUserMessage({
+          content: [{ type: 'text', text: CONTEXT_REMINDER }],
+          source: { kind: CONTEXT_SOURCE_KIND, form: 'notice', summary: 'Parallel tool-call scheduling reminder' } as unknown as MessageSource,
+        })],
+      };
+    }, { prepend: true });
+  }
+
   ctx.on('agent/created', ({ agent }): undefined => {
-    attach(ctx, agent, config, presetIds, registrations, active);
+    attach(ctx, agent, config, presetIds, registrations, active, reminderAgents);
   });
 
   // A plugin reload disposes the previous instance's section registrations, and
@@ -137,7 +150,7 @@ export function apply(ctx: Context, config: Config): void {
     // Runs once at apply/reload time: re-attach to agents that survived the
     // previous instance's disposal. The no-op disposer satisfies the effect
     // contract; per-agent cleanup is owned by each registration instead.
-    for (const agent of ctx.agents.roots()) attach(ctx, agent, config, presetIds, registrations, active);
+    for (const agent of ctx.agents.roots()) attach(ctx, agent, config, presetIds, registrations, active, reminderAgents);
     return () => {};
   });
 }

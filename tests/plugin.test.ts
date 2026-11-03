@@ -62,6 +62,12 @@ async function fixture() {
       inject,
       created: (source: 'startup' | 'resume' = 'startup') =>
         ctx.serial(scopeTarget(value, key), 'agent/created', { agent: value, source }),
+      // The last waterfall argument is the innermost `next`: the loop entering with an empty inbox.
+      preStep: (step = 1) => (ctx as unknown as { waterfall: (...a: unknown[]) => Promise<unknown> }).waterfall(
+        scopeTarget(value, key), 'agent/pre-step',
+        { agent: value, messages: [], turn: 1, step, signal: new AbortController().signal },
+        async () => ({ kind: 'enter', messages: [] }),
+      ) as Promise<{ kind: string; messages: Array<{ content: Array<{ text: string }>; source: { kind: string; form?: string } }> }>,
       assemble: () => ctx.systemPrompt.assemble({ scope: key }),
       guidance: async () => (await ctx.systemPrompt.assemble({ scope: key })).sections
         .filter((section) => section.name === plugin.SECTION_NAME),
@@ -212,18 +218,21 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     expect(await fresh.guidance()).toEqual([expectedSection]);
   });
 
-  it('injects the conversation reminder once when contextReminder is enabled', async () => {
+  it('appends the reminder once via pre-step as a sourced context message', async () => {
     const f = await fixture();
     const agent = f.agent();
     await agent.created();
     await f.load({ enabled: true, contextReminder: true }).inertia;
-    expect(agent.inject).toHaveBeenCalledTimes(1);
-    const message = agent.inject.mock.calls[0]?.[0] as { content: Array<{ type: string; text: string }>; source: { kind: string; form?: string } };
-    // Must render as a CONTEXT block, never as a fake user bubble.
-    expect(message.source.kind).toBe('runtime-context');
+    const first = await agent.preStep(1);
+    expect(first.messages).toHaveLength(1);
+    const message = first.messages[0]!;
+    // Own source kind: never a fake user bubble.
+    expect(message.source.kind).toBe(plugin.CONTEXT_SOURCE_KIND);
     expect(message.source.form).toBe('notice');
     expect(message.content[0]?.text).toContain(plugin.CONTEXT_MARKER);
     expect(message.content[0]?.text).toContain('independent tool calls together');
+    expect((await agent.preStep(2)).messages).toHaveLength(0);
+    expect(agent.inject).not.toHaveBeenCalled();
   });
 
   it('systemPromptSection:false keeps the reminder but registers no system section', async () => {
@@ -232,32 +241,32 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     await agent.created();
     await f.load({ enabled: true, systemPromptSection: false, contextReminder: true }).inertia;
     expect(await agent.guidance()).toEqual([]);
-    expect(agent.inject).toHaveBeenCalledTimes(1);
+    expect((await agent.preStep()).messages).toHaveLength(1);
   });
 
-  it('skips the reminder when disabled or when the session already carries the marker', async () => {
+  it('skips the reminder when disabled or when the transcript already carries it', async () => {
     const disabled = await fixture();
     const off = disabled.agent();
     await off.created();
     await disabled.load({ enabled: true }).inertia;
-    expect(off.inject).not.toHaveBeenCalled();
+    expect((await off.preStep()).messages).toHaveLength(0);
 
     const marked = await fixture();
     const existing = marked.agent({ agentPreset: 'standard' }, {
-      sessionEvents: [{ type: 'user/message', data: { content: [{ type: 'text', text: `${plugin.CONTEXT_MARKER} reminder body` }] } }],
+      sessionEvents: [{ type: 'user/message', data: { source: { kind: plugin.CONTEXT_SOURCE_KIND }, content: [{ type: 'text', text: 'x' }] } }],
     });
     await existing.created();
     await marked.load({ enabled: true, contextReminder: true }).inertia;
-    expect(existing.inject).not.toHaveBeenCalled();
+    expect((await existing.preStep()).messages).toHaveLength(0);
 
-    // A compaction summary quoting the marker must not suppress injection.
-    const quoted = await fixture();
-    const summarised = quoted.agent({ agentPreset: 'standard' }, {
-      sessionEvents: [{ type: 'user/message', data: { content: [{ type: 'text', text: `checkpoint summary mentions ${plugin.CONTEXT_MARKER} in passing` }] } }],
+    // Legacy user-kind messages quoting the marker must not suppress delivery.
+    const legacy = await fixture();
+    const old = legacy.agent({ agentPreset: 'standard' }, {
+      sessionEvents: [{ type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: `${plugin.CONTEXT_MARKER} old` }] } }],
     });
-    await summarised.created();
-    await quoted.load({ enabled: true, contextReminder: true }).inertia;
-    expect(summarised.inject).toHaveBeenCalledTimes(1);
+    await old.created();
+    await legacy.load({ enabled: true, contextReminder: true }).inertia;
+    expect((await old.preStep()).messages).toHaveLength(1);
   });
 
   it('reload catch-up stays idempotent with agent/created and cleans up on unload', async () => {

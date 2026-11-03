@@ -218,7 +218,10 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     await agent.created();
     await f.load({ enabled: true, contextReminder: true }).inertia;
     expect(agent.inject).toHaveBeenCalledTimes(1);
-    const message = agent.inject.mock.calls[0]?.[0] as { content: Array<{ type: string; text: string }> };
+    const message = agent.inject.mock.calls[0]?.[0] as { content: Array<{ type: string; text: string }>; source: { kind: string; form?: string } };
+    // Must render as a CONTEXT block, never as a fake user bubble.
+    expect(message.source.kind).toBe('runtime-context');
+    expect(message.source.form).toBe('notice');
     expect(message.content[0]?.text).toContain(plugin.CONTEXT_MARKER);
     expect(message.content[0]?.text).toContain('independent tool calls together');
   });

@@ -3,7 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import type {} from '@deepseek-ai/dsh-agent-preset-registry';
 import type {} from '@deepseek-ai/dsh-session-projection';
 import type {} from '@deepseek-ai/dsh-system-prompt';
-import { createUserMessage } from '@deepseek-ai/dsh-llm';
+import { createUserMessage, type MessageSource } from '@deepseek-ai/dsh-llm';
 import z from '@deepseek-ai/schemastery';
 import { PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from './prompt.js';
 import { installPromptDebug } from './debug.js';
@@ -71,7 +71,10 @@ function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<strin
       if (!already) {
         agent.inject(createUserMessage({
           content: [{ type: 'text', text: CONTEXT_REMINDER }],
-          source: { kind: 'user' },
+          // runtime-context renders as a CONTEXT block, not a fake user bubble.
+          // The kind is registered by the host at runtime (merge-extensible
+          // MessageSourceMap), so it is not visible to this package's types.
+          source: { kind: 'runtime-context', form: 'notice', summary: 'Parallel tool-call scheduling reminder' } as unknown as MessageSource,
         }));
       }
     } catch { /* reminder must never break attach */ }

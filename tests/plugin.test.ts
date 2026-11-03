@@ -232,11 +232,20 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
     const marked = await fixture();
     const existing = marked.agent({ agentPreset: 'standard' }, {
-      sessionEvents: [{ type: 'user/message', data: { content: [{ type: 'text', text: `preface ${plugin.CONTEXT_MARKER} tail` }] } }],
+      sessionEvents: [{ type: 'user/message', data: { content: [{ type: 'text', text: `${plugin.CONTEXT_MARKER} reminder body` }] } }],
     });
     await existing.created();
     await marked.load({ enabled: true, contextReminder: true }).inertia;
     expect(existing.inject).not.toHaveBeenCalled();
+
+    // A compaction summary quoting the marker must not suppress injection.
+    const quoted = await fixture();
+    const summarised = quoted.agent({ agentPreset: 'standard' }, {
+      sessionEvents: [{ type: 'user/message', data: { content: [{ type: 'text', text: `checkpoint summary mentions ${plugin.CONTEXT_MARKER} in passing` }] } }],
+    });
+    await summarised.created();
+    await quoted.load({ enabled: true, contextReminder: true }).inertia;
+    expect(summarised.inject).toHaveBeenCalledTimes(1);
   });
 
   it('reload catch-up stays idempotent with agent/created and cleans up on unload', async () => {

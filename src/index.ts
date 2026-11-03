@@ -60,8 +60,14 @@ function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<strin
   // The transcript scan keeps reloads from stacking duplicate reminders.
   if (config.contextReminder) {
     try {
-      const already = agent.session.snapshotEvents().some(event =>
-        event.type === 'user/message' && JSON.stringify(event.data?.content ?? '').includes(CONTEXT_MARKER));
+      const already = agent.session.snapshotEvents().some(event => {
+        if (event.type !== 'user/message') return false;
+        const content = (event.data as { content?: readonly { type?: string; text?: unknown }[] } | undefined)?.content;
+        const text = Array.isArray(content) ? content.find(part => part?.type === 'text')?.text : undefined;
+        // Prefix match only: a compaction summary quoting the marker must not
+        // suppress a genuine reminder injection.
+        return typeof text === 'string' && text.trimStart().startsWith(CONTEXT_MARKER);
+      });
       if (!already) {
         agent.inject(createUserMessage({
           content: [{ type: 'text', text: CONTEXT_REMINDER }],

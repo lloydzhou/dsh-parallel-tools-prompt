@@ -3,7 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import type {} from '@deepseek-ai/dsh-agent-preset-registry';
 import type {} from '@deepseek-ai/dsh-session-projection';
 import type {} from '@deepseek-ai/dsh-system-prompt';
-import { createUserMessage, type MessageSource } from '@deepseek-ai/dsh-llm';
+import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import z from '@deepseek-ai/schemastery';
 import { PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from './prompt.js';
 import { installPromptDebug } from './debug.js';
@@ -13,12 +13,17 @@ export { BATCH_RULE, PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from '
 export const name = 'parallel-tools-prompt';
 export const inject = ['agents', 'systemPrompt', 'sessionProjections'];
 
-/** Stable marker so a reload never injects the reminder twice into one session. */
-export const CONTEXT_MARKER = '[parallel-tools:scheduling-v2]';
-export const CONTEXT_REMINDER = `${CONTEXT_MARKER} Every response: before answering, check what else the current subgoal already has ready and issue ALL ready, independent tool calls together in this one response — same-tool calls on different targets, parallel reads, independent searches and checks. Each response is one model round trip; issuing ready work one call at a time spends one round trip per call. Hold a call only for real dependencies: its arguments need an earlier result, read-before-edit, shared-file or approval ordering. A single call is fine when nothing else is ready; never invent calls to fill a batch.`;
+/** Model-facing text of the optional context-channel reminder. */
+export const CONTEXT_REMINDER = 'Every response: before answering, check what else the current subgoal already has ready and issue ALL ready, independent tool calls together in this one response — same-tool calls on different targets, parallel reads, independent searches and checks. Each response is one model round trip; issuing ready work one call at a time spends one round trip per call. Hold a call only for real dependencies: its arguments need an earlier result, read-before-edit, shared-file or approval ordering. A single call is fine when nothing else is ready; never invent calls to fill a batch.';
 
-
+/** Source kind of the reminder message; the host renders unknown context kinds as CONTEXT blocks. */
 export const CONTEXT_SOURCE_KIND = 'parallel-tools-scheduling';
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    [CONTEXT_SOURCE_KIND]: { kind: typeof CONTEXT_SOURCE_KIND; form: 'notice'; summary: string };
+  }
+}
 
 /** True when the session transcript already carries our sourced reminder. */
 function hasReminder(agent: Agent): boolean {
@@ -36,10 +41,10 @@ export const Config = z.object({
     'Enable static tool-call scheduling guidance. The bundle explicitly opts in; direct plugin use is disabled by default.',
   ),
   systemPromptSection: z.boolean().default(true).description(
-    'Register the static scheduling guidance section in the system prompt (default true). Set false to rely on contextReminder alone.',
+    'Inject the static scheduling guidance as a system-prompt section (default true). May be combined with contextReminder; with both off the plugin injects nothing.',
   ),
   contextReminder: z.boolean().default(false).description(
-    'Additionally inject a one-time scheduling reminder as model-facing conversation context at the next step boundary. Persists in the session transcript; survives reloads without duplication.',
+    'Inject a one-time scheduling reminder as a CONTEXT message at the next step boundary (default false). Persists in the session transcript; never duplicated across reloads. Independent of systemPromptSection.',
   ),
   presetIds: z.array(z.string().pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/))
     .max(32).default(['standard']).description(
@@ -125,14 +130,14 @@ export function apply(ctx: Context, config: Config): void {
       const decision = await next();
       if (decision.kind === 'reject' || signal.aborted) return decision;
       if (!reminderAgents.has(agent) || delivered.has(agent)) return decision;
-      const present = hasReminder(agent) || decision.messages.some(m => (m.source?.kind as string | undefined) === CONTEXT_SOURCE_KIND);
+      const present = hasReminder(agent) || decision.messages.some(m => m.source.kind === CONTEXT_SOURCE_KIND);
       delivered.add(agent);
       if (present) return decision;
       return {
         ...decision,
         messages: [...decision.messages, createUserMessage({
           content: [{ type: 'text', text: CONTEXT_REMINDER }],
-          source: { kind: CONTEXT_SOURCE_KIND, form: 'notice', summary: 'Parallel tool-call scheduling reminder' } as unknown as MessageSource,
+          source: { kind: CONTEXT_SOURCE_KIND, form: 'notice', summary: 'Parallel tool-call scheduling reminder' },
         })],
       };
     }, { prepend: true });

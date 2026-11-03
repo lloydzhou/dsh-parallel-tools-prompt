@@ -229,10 +229,26 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     // Own source kind: never a fake user bubble.
     expect(message.source.kind).toBe(plugin.CONTEXT_SOURCE_KIND);
     expect(message.source.form).toBe('notice');
-    expect(message.content[0]?.text).toContain(plugin.CONTEXT_MARKER);
+    expect(message.content[0]?.text).toBe(plugin.CONTEXT_REMINDER);
     expect(message.content[0]?.text).toContain('independent tool calls together');
     expect((await agent.preStep(2)).messages).toHaveLength(0);
     expect(agent.inject).not.toHaveBeenCalled();
+  });
+
+  it('defaults to the system section only; both switches can be combined', async () => {
+    const dflt = await fixture();
+    const a = dflt.agent();
+    await a.created();
+    await dflt.load({ enabled: true }).inertia;
+    expect(await a.guidance()).toEqual([expectedSection]);
+    expect((await a.preStep()).messages).toHaveLength(0);
+
+    const both = await fixture();
+    const b = both.agent();
+    await b.created();
+    await both.load({ enabled: true, contextReminder: true }).inertia;
+    expect(await b.guidance()).toEqual([expectedSection]);
+    expect((await b.preStep()).messages).toHaveLength(1);
   });
 
   it('systemPromptSection:false keeps the reminder but registers no system section', async () => {
@@ -259,10 +275,10 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     await marked.load({ enabled: true, contextReminder: true }).inertia;
     expect((await existing.preStep()).messages).toHaveLength(0);
 
-    // Legacy user-kind messages quoting the marker must not suppress delivery.
+    // Ordinary user messages (even ones quoting the reminder text) must not suppress delivery.
     const legacy = await fixture();
     const old = legacy.agent({ agentPreset: 'standard' }, {
-      sessionEvents: [{ type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: `${plugin.CONTEXT_MARKER} old` }] } }],
+      sessionEvents: [{ type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: plugin.CONTEXT_REMINDER }] } }],
     });
     await old.created();
     await legacy.load({ enabled: true, contextReminder: true }).inertia;

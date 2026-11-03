@@ -10,7 +10,7 @@
 - 使用公开 `agent/created`、`agents.roots()`、session projection 与 `systemPrompt.section()`，不替换 preset。
 - 固定 section 名称 `parallel-tools:guidance`、order 1050、禁止插值；不注入时间戳、工具列表或每轮变化的数据。
 - 同一 Agent 幂等注册；插件卸载与 Agent 释放都清理 section。插件重载时为仍存活的目标根 Agent 补挂 section；源码更新建议重启宿主加载新模块。
-- bundle 默认开启 `contextReminder`：通过公开 `agent.inject()` 在下一步骤边界注入一次带 `[parallel-tools:scheduling-v2]` 标记的对话提醒，强调提前规划就绪批次以减少模型往返。直接使用插件时此选项默认关闭。提醒进入会话历史，卸载不会删除；已持久化标记用于避免重复注入。这不是每轮重复提醒，也不保证长期遵循。
+- 两个独立开关选择注入通道（默认只走系统提示词）：`systemPromptSection`（默认 `true`，注册 `systemPrompt.section()`）与 `contextReminder`（默认 `false`）。后者通过 `agent/pre-step` 在下一步骤追加一条带独立 `source.kind: parallel-tools-scheduling` 的 CONTEXT 提醒，写入会话历史并渲染为 CONTEXT 块，与宿主 `time-context` 同一机制；已持久化的 source 用于避免重复注入，每个 Agent 只交付一次。两者可同时开启；同时关闭则插件不注入任何内容。提醒进入历史，卸载不会删除。这不是每轮重复提醒，也不保证长期遵循。
 - 单次调用合理时仍单次；路径、ID等参数必须已知；读后写、共享文件冲突、权限审批保持依赖顺序。不发明batch工具或额外规划轮次。
 - 同轮多个工具调用不代表真正同时执行；执行并发仍由DSH调度器决定。
 
@@ -46,11 +46,12 @@ npm pack --dry-run
 
 ```yaml
 enabled: true
-contextReminder: true
+systemPromptSection: true   # 默认；系统提示词通道
+contextReminder: false      # 默认；设为 true 启用 CONTEXT 提醒通道
 presetIds: [standard]
 ```
 
-**注意：profile 的 `cordis.patch.yml` 覆盖本插件时，`config` 是整体替换、不与 bundle 默认值深合并。** 覆盖项必须写全需要的字段（至少 `enabled: true`、`presetIds`），否则 `enabled` 回落为默认 `false`，插件静默不注入。验收方式：新会话的 `system/message` 中应出现 `Tool-call scheduling:`。
+**注意：profile 的 `cordis.patch.yml` 覆盖本插件时，`config` 是整体替换、不与 bundle 默认值深合并。** 覆盖项必须写全需要的字段（至少 `enabled: true`、`presetIds`），否则 `enabled` 回落为默认 `false`，插件静默不注入。验收方式：系统提示词通道看新会话 `system/message` 中是否出现 `Tool-call scheduling:`；CONTEXT 通道看会话里是否出现 `source.kind` 为 `parallel-tools-scheduling` 的消息。
 
 `presetIds` 是精确ID列表，不是正则。自定义目标仅适用于原生工具调用preset；不要把PTC加入以免对专用执行模式施加不合适的指导。根会话fork可以保留历史parentSession，不会仅因此被当作子智能体。
 

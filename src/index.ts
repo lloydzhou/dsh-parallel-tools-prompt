@@ -14,7 +14,7 @@ export const name = 'parallel-tools-prompt';
 export const inject = ['agents', 'systemPrompt', 'sessionProjections'];
 
 /** Stable marker so a reload never injects the reminder twice into one session. */
-export const CONTEXT_MARKER = '[parallel-tools:scheduling]';
+export const CONTEXT_MARKER = '[parallel-tools:scheduling-v2]';
 export const CONTEXT_REMINDER = `${CONTEXT_MARKER} Every response: before answering, check what else the current subgoal already has ready and issue ALL ready, independent tool calls together in this one response — same-tool calls on different targets, parallel reads, independent searches and checks. Each response is one model round trip; issuing ready work one call at a time spends one round trip per call. Hold a call only for real dependencies: its arguments need an earlier result, read-before-edit, shared-file or approval ordering. A single call is fine when nothing else is ready; never invent calls to fill a batch.`;
 
 export const Config = z.object({

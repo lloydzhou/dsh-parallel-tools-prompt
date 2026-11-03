@@ -10,7 +10,7 @@
 - 使用公开 `agent/created`、`agents.roots()`、session projection 与 `systemPrompt.section()`，不替换 preset。
 - 固定 section 名称 `parallel-tools:guidance`、order 1050、禁止插值；不注入时间戳、工具列表或每轮变化的数据。
 - 同一 Agent 幂等注册；插件卸载与 Agent 释放都清理 section。插件重载时为仍存活的目标根 Agent 补挂 section；源码更新建议重启宿主加载新模块。
-- bundle 默认开启 `contextReminder`：通过公开 `agent.inject()` 在下一步骤边界注入一次带 `[parallel-tools:scheduling]` 标记的对话提醒，强调提前规划就绪批次以减少模型往返。直接使用插件时此选项默认关闭。提醒进入会话历史，卸载不会删除；已持久化标记用于避免重复注入。这不是每轮重复提醒，也不保证长期遵循。
+- bundle 默认开启 `contextReminder`：通过公开 `agent.inject()` 在下一步骤边界注入一次带 `[parallel-tools:scheduling-v2]` 标记的对话提醒，强调提前规划就绪批次以减少模型往返。直接使用插件时此选项默认关闭。提醒进入会话历史，卸载不会删除；已持久化标记用于避免重复注入。这不是每轮重复提醒，也不保证长期遵循。
 - 单次调用合理时仍单次；路径、ID等参数必须已知；读后写、共享文件冲突、权限审批保持依赖顺序。不发明batch工具或额外规划轮次。
 - 同轮多个工具调用不代表真正同时执行；执行并发仍由DSH调度器决定。
 

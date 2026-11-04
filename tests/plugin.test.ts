@@ -415,12 +415,34 @@ describe('shared dependency-aware scheduling rule', () => {
   it('uses the same rule in both independently enabled injection channels', () => {
     expect(plugin.CONTEXT_REMINDER).toBe(plugin.BATCH_RULE);
     expect(plugin.PARALLEL_TOOLS_PROMPT).toBe(`Tool-call scheduling: ${plugin.BATCH_RULE}`);
+  });
+
+  it('starts with useful action discovery before internal dependency checking', () => {
+    expect(plugin.BATCH_RULE.startsWith(
+      'Before calling tools, briefly check what other useful work can run now without these results.',
+    )).toBe(true);
     for (const requirement of [
-      'dependency DAG', 'prerequisites are satisfied', 'inputs are known',
-      'independent tool calls together in one response', 'tool/output limits',
-      'whether or how', 'shared state', 'read-before-edit',
-      'After results arrive, reassess', 'completed or running work',
-      'never invent work', 'preserve required plan, todo, and approval workflows',
+      'internal dependency DAG for the current subgoal', 'known inputs and prerequisites met',
+      'all ready, independent tool calls together in one response', 'tool/output limits',
+      'Gather independent evidence together even if later combined',
+    ]) expect(plugin.BATCH_RULE).toContain(requirement);
+  });
+
+  it('continues only independent, non-interfering background work and reassesses results', () => {
+    expect(plugin.BATCH_RULE).toContain(
+      'While background work runs, continue work independent of its results and non-interfering with its state.',
+    );
+    expect(plugin.BATCH_RULE).toContain('After results, reassess; never repeat running/completed work.');
+  });
+
+  it('allows valid serial work while preserving safety and scheduling guardrails', () => {
+    for (const requirement of [
+      'Wait for results that decide whether or how to act, approvals, or shared-state ordering',
+      'read-before-edit', 'Real dependency chains and single calls are valid; never invent work',
+      'Use tools as intended, not shell wrappers or delegation to simulate batching',
+      'No printed DAG or extra scheduling turns',
+      'preserve required plan, todo, and approval workflows',
+      'Aim to reduce model round trips; actual concurrency depends on runtime',
     ]) expect(plugin.BATCH_RULE).toContain(requirement);
   });
 });
@@ -433,5 +455,19 @@ describe('skill distribution', () => {
     expect(description).toBe(plugin.BATCH_RULE);
     expect(plugin.BATCH_RULE.length).toBeLessThanOrEqual(1024);
     expect(plugin.PARALLEL_TOOLS_PROMPT.startsWith('Tool-call scheduling: ')).toBe(true);
+  });
+
+  it('expands action discovery, non-interfering background work, and valid serial examples in the body', async () => {
+    const { readFileSync } = await import('node:fs');
+    const text = readFileSync(new URL('../skills/batch-tool-calls/SKILL.md', import.meta.url), 'utf8');
+    const body = text.split('\n---\n')[1]!;
+    for (const requirement of [
+      'Before calling tools, briefly check what other useful work can run now without these results.',
+      'neither needs its results nor interferes with its state',
+      'do not busy-poll or duplicate running/completed calls or delegations',
+      'Real dependency chains and single calls are valid', 'test → failure → fix → retest',
+      'do not edit files those tests depend on or launch the same tests again',
+      'Actual concurrency depends on the runtime/host scheduler',
+    ]) expect(body).toContain(requirement);
   });
 });

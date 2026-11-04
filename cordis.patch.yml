@@ -1,10 +1,12 @@
 # Installing/enabling this bundle is the explicit opt-in. Direct plugin use
-# defaults to enabled:false. Guidance goes into the system prompt by default;
-# add `contextReminder: true` for the CONTEXT-message channel (or
-# `systemPromptSection: false` to use only that channel). No preset replacement or scheduler changes.
+# defaults to enabled:false. The one-time CONTEXT reminder applies to all agents,
+# including subagents and all presets. The optional system-prompt channel remains
+# limited to eligible roots selected by presetIds. No scheduler changes.
 - insert:
     - id: parallel-tools-prompt
       name: dsh-parallel-tools-prompt
       config:
         enabled: true
+        contextReminder: true
+        systemPromptSection: false
         presetIds: [standard]

@@ -6,18 +6,18 @@
 
 ## 行为
 
-- 默认只作用于创建/恢复时的 `standard` 根 Agent；跳过子智能体、PTC、minimal、creator 等非目标会话。
-- 使用公开 `agent/created`、`agents.roots()`、session projection 与 `systemPrompt.section()`，不替换 preset。
-- 固定 section 名称 `parallel-tools:guidance`、order 1050、禁止插值；不注入时间戳、工具列表或每轮变化的数据。
-- 同一 Agent 幂等注册；插件卸载与 Agent 释放都清理 section。插件重载时为仍存活的目标根 Agent 补挂 section；源码更新建议重启宿主加载新模块。
-- 两个独立开关选择注入通道（默认只走系统提示词）：`systemPromptSection`（默认 `true`，注册 `systemPrompt.section()`）与 `contextReminder`（默认 `false`）。后者通过 `agent/pre-step` 在下一步骤追加一条带独立 `source.kind: parallel-tools-scheduling` 的 CONTEXT 提醒，写入会话历史并渲染为 CONTEXT 块，与宿主 `time-context` 同一机制；已持久化的 source 用于避免重复注入，每个 Agent 只交付一次。两者可同时开启；同时关闭则插件不注入任何内容。提醒进入历史，卸载不会删除。这不是每轮重复提醒，也不保证长期遵循。
+- 插件启用后，默认通过 `contextReminder` 向所有 Agent（包括子智能体）提供提醒，覆盖所有 preset 以及没有 preset 的会话；`presetIds` 与根 Agent 筛选不限制此通道。插件重载前已存活的子智能体也会在下一步骤获得提醒。
+- `systemPromptSection` 是默认关闭的可选通道；只有此通道按符合条件的根 Agent 与 `presetIds` 筛选，默认目标为 `standard` 根 Agent，跳过子智能体及不在列表中的 preset。
+- 使用公开 Agent 生命周期、session projection 与 `systemPrompt.section()`，不替换 preset。系统提示词 section 固定名称 `parallel-tools:guidance`、order 1050、禁止插值；不注入时间戳、工具列表或每轮变化的数据。
+- 同一 Agent 幂等注册；插件卸载与 Agent 释放都清理 section。插件重载时为仍存活的目标根 Agent 补挂已启用的 section，并覆盖仍存活 Agent 的提醒通道；源码更新建议重启宿主加载新模块。
+- 两个独立开关选择注入通道（默认只走 CONTEXT 提醒）：`contextReminder`（默认 `true`）与 `systemPromptSection`（默认 `false`，设为 `true` 输出 `systemPrompt.section()` 的指引内容）。提醒通过 `agent/pre-step` 在下一步骤追加一条带独立 `source.kind: parallel-tools-scheduling` 的 CONTEXT 消息，写入会话历史并渲染为 CONTEXT 块，与宿主 `time-context` 同一机制；已持久化的 source 用于去重，包括继承历史中的提醒，每个 Agent 最多交付一次，已有或继承的提醒不会重复注入。两者可同时开启；同时关闭则插件不注入任何内容。提醒进入历史，卸载不会删除。这不是每轮重复提醒，也不保证长期遵循。
 - 插件详情页（Plugins → 本插件）在描述与组件列表之间提供这两个开关的设置表单，开关即时写入当前 profile 的 patch。两个字段声明为 `.volatile()`，修改不重启插件：`contextReminder` 在下一步骤生效；系统提示词开关对修改之后重新组装提示词的会话生效（已建立的会话沿用旧提示词）。浏览器端由 `src/client` 经 `scripts/build-client.mjs` 构建为 `lib/client.js`，按宿主客户端模块格式封装；表单要求 profile 里条目 id 为 `parallel-tools-prompt`。
 - 单次调用合理时仍单次；路径、ID等参数必须已知；读后写、共享文件冲突、权限审批保持依赖顺序。不发明batch工具或额外规划轮次。
 - 同轮多个工具调用不代表真正同时执行；执行并发仍由DSH调度器决定。
 
 ## 版本、依赖与发布
 
-插件版本 `0.2.1-rc.1` 跟随 DSH 的 `0.2.1` 版本线，RC 序号独立递增，不等于宿主 RC 序号。最低宿主要求 `>=0.2.1-rc.3`，Node.js `>=24.9.0`。开发锁文件以 RC.5 为基线；RC.3 的相关接口已做源码比对，完整插件测试本次运行在 RC.5 依赖上，不冒充两套运行验收。
+插件版本 `0.2.1-rc.5` 跟随 DSH 的 `0.2.1` 版本线，RC 序号独立递增，不等于宿主 RC 序号。最低宿主要求 `>=0.2.1-rc.3`，Node.js `>=24.9.0`。开发锁文件以 RC.5 为基线；RC.3 的相关接口已做源码比对，完整插件测试本次运行在 RC.5 依赖上，不冒充两套运行验收。
 
 宿主库以 peerDependencies 声明，同时列入 devDependencies 供构建测试：Cordis `4.0.5`、Schemastery `3.18.5`、DSH agent/llm/preset-registry/session-projection/system-prompt 使用 `^0.2.1-rc.3`。不将宿主服务打包为普通运行依赖，避免重复服务身份。semver caret 不跨 `0.3`，也不自动接纳不同版本号的预发布版本。
 
@@ -31,7 +31,7 @@
 
 ## 开发与安装
 
-尚未发布 npm；已在本地 Web profile 链接安装并进行人工观察。一次探索任务出现连续多调用批次，但模型同时发生切换，不能据此归因于插件或宣称 token/费用节省。
+已在本地 Web profile 链接安装并进行人工观察。一次探索任务出现连续多调用批次，但模型同时发生切换，不能据此归因于插件或宣称 token/费用节省。
 
 ```sh
 npm ci
@@ -41,20 +41,20 @@ npm test
 npm pack --dry-run
 ```
 
-确认愿意启用后，手动安装本目录到目标 profile，例如 `dsh plugin --profile web add .`；Desktop 选择 `--profile desktop`。本插件没有客户端 UI，不需要 `dsh.client`。
+确认愿意启用后，手动安装本目录到目标 profile，例如 `dsh plugin --profile web add .`；Desktop 选择 `--profile desktop`。本插件提供客户端设置 UI，可在 Plugins → 本插件详情页调整两个注入通道。
 
 直接调用插件默认 `enabled: false`；bundle显式配置 `enabled: true`，安装bundle即选择启用。配置：
 
 ```yaml
 enabled: true
-systemPromptSection: true   # 默认；系统提示词通道
-contextReminder: false      # 默认；设为 true 启用 CONTEXT 提醒通道
-presetIds: [standard]
+systemPromptSection: false  # 默认；设为 true 选择启用系统提示词通道
+contextReminder: true       # 默认；所有 Agent（含子智能体），不限 preset
+presetIds: [standard]       # 默认；只筛选系统提示词通道的目标根 Agent
 ```
 
-**注意：profile 的 `cordis.patch.yml` 覆盖本插件时，`config` 是整体替换、不与 bundle 默认值深合并。** 覆盖项必须写全需要的字段（至少 `enabled: true`、`presetIds`），否则 `enabled` 回落为默认 `false`，插件静默不注入。验收方式：系统提示词通道看新会话 `system/message` 中是否出现 `Tool-call scheduling:`；CONTEXT 通道看会话里是否出现 `source.kind` 为 `parallel-tools-scheduling` 的消息。
+**注意：profile 的 `cordis.patch.yml` 覆盖本插件时，`config` 是整体替换、不与 bundle 默认值深合并。** 覆盖项必须写全需要的字段，尤其是 `enabled: true`；否则 `enabled` 回落为默认 `false`，插件静默不注入。省略的通道字段使用上述 schema 默认值；自定义系统提示词目标时也要保留所需 `presetIds`。已有 profile 中显式设置的值不会自动迁移：例如原来的 `contextReminder: false` 或 `systemPromptSection: true` 仍保留，需通过设置 UI 或手动修改 profile 才会改变。验收方式：系统提示词通道看新会话 `system/message` 中是否出现 `Tool-call scheduling:`；CONTEXT 通道看会话里是否出现 `source.kind` 为 `parallel-tools-scheduling` 的消息。
 
-`presetIds` 是精确ID列表，不是正则。自定义目标仅适用于原生工具调用preset；不要把PTC加入以免对专用执行模式施加不合适的指导。根会话fork可以保留历史parentSession，不会仅因此被当作子智能体。
+`presetIds` 是精确 ID 列表，不是正则，且只控制选择启用后的系统提示词通道，不影响 CONTEXT 提醒。系统提示词的自定义目标仅适用于原生工具调用 preset；不要把 PTC 加入该列表，以免对专用执行模式施加额外系统指导。默认 CONTEXT 提醒仍覆盖 PTC、minimal、creator 等所有 preset、无 preset 会话及子智能体。根会话 fork 可以保留历史 parentSession，不会仅因此被当作子智能体；若继承了已有提醒，则不会再注入。
 
 卸载会释放注册；已有模型历史中的旧指令不会被改写或删除。若宿主需要重新投影系统提示，生效边界由宿主管理；稳妥方式是重启后继续原会话。首次安装可能改变system前缀并影响一次缓存复用；不能保证零缓存影响。
 

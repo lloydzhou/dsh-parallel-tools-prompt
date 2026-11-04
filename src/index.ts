@@ -41,15 +41,15 @@ export const Config = z.object({
   enabled: z.boolean().default(false).description(
     'Enable static tool-call scheduling guidance. The bundle explicitly opts in; direct plugin use is disabled by default.',
   ),
-  systemPromptSection: z.boolean().default(true).volatile().description(
-    'Inject the static scheduling guidance as a system-prompt section (default true). May be combined with contextReminder; with both off the plugin injects nothing.',
+  systemPromptSection: z.boolean().default(false).volatile().description(
+    'Inject static scheduling guidance as a system-prompt section for eligible roots (default false). May be combined with contextReminder; with both off the plugin injects nothing.',
   ),
-  contextReminder: z.boolean().default(false).volatile().description(
-    'Inject a one-time scheduling reminder as a CONTEXT message at the next step boundary (default false). Persists in the session transcript; never duplicated across reloads. Independent of systemPromptSection.',
+  contextReminder: z.boolean().default(true).volatile().description(
+    'Inject a one-time scheduling reminder as a CONTEXT message for all agents, including subagents and all presets, at the next step boundary (default true). Persists in the session transcript; never duplicated across reloads. Independent of systemPromptSection and presetIds.',
   ),
   presetIds: z.array(z.string().pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/))
     .max(32).default(['standard']).description(
-      'Exact preset IDs to target at agent creation. Root agents only; use native-tool presets, not PTC. An empty list disables all targets.',
+      'Exact preset IDs for the system-prompt channel only. Root agents only; use native-tool presets, not PTC. An empty list disables system-prompt targets, not context reminders.',
     ),
 });
 
@@ -68,7 +68,7 @@ type Registration = { release?: () => void | Promise<void> };
  * reload-time catch-up, so a plugin reload cannot silently drop guidance from
  * agents that survive it (the old instance's disposal removed its sections).
  */
-function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<string>, registrations: WeakMap<Agent, Registration>, active: Set<Registration>, reminderAgents: WeakSet<Agent>): void {
+function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<string>, registrations: WeakMap<Agent, Registration>, active: Set<Registration>): void {
   if (registrations.has(agent)) return;
   const { header } = agent.session;
   // Durable child metadata survives resume; live ownership covers children
@@ -78,10 +78,6 @@ function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<strin
   const preset = ctx.sessionProjections.stateOf(agent.session, 'agentPreset')
     ?? header.agentPreset;
   if (preset === undefined || !presetIds.has(preset)) return;
-
-  // Conversation-level reminder: appended by the pre-step listener below once
-  // this agent is eligible (agent.inject only accepts user-kind messages).
-  reminderAgents.add(agent);
 
   const registration: Registration = {};
   // Returning the disposer is essential: ctx.effect does not implicitly adopt
@@ -119,7 +115,6 @@ export function apply(ctx: Context, config: Config): void {
   const presetIds = new Set(config.presetIds);
   const registrations = new WeakMap<Agent, Registration>();
   const active = new Set<Registration>();
-  const reminderAgents = new WeakSet<Agent>();
 
   // Agent contexts are not children of this plugin's fiber. Explicitly give the
   // plugin ownership of their effect disposers as well as agent-local ownership.
@@ -137,7 +132,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
       const decision = await next();
       if (decision.kind === 'reject' || signal.aborted) return decision;
-      if (!flag(config.contextReminder) || !reminderAgents.has(agent) || delivered.has(agent)) return decision;
+      if (!flag(config.contextReminder) || delivered.has(agent)) return decision;
       const present = hasReminder(agent) || decision.messages.some(m => m.source.kind === CONTEXT_SOURCE_KIND);
       delivered.add(agent);
       if (present) return decision;
@@ -152,7 +147,7 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   ctx.on('agent/created', ({ agent }): undefined => {
-    attach(ctx, agent, config, presetIds, registrations, active, reminderAgents);
+    attach(ctx, agent, config, presetIds, registrations, active);
   });
 
   // A plugin reload disposes the previous instance's section registrations, and
@@ -163,7 +158,7 @@ export function apply(ctx: Context, config: Config): void {
     // Runs once at apply/reload time: re-attach to agents that survived the
     // previous instance's disposal. The no-op disposer satisfies the effect
     // contract; per-agent cleanup is owned by each registration instead.
-    for (const agent of ctx.agents.roots()) attach(ctx, agent, config, presetIds, registrations, active, reminderAgents);
+    for (const agent of ctx.agents.roots()) attach(ctx, agent, config, presetIds, registrations, active);
     return () => {};
   });
 }

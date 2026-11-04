@@ -101,7 +101,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
   it.each(['startup', 'resume'] as const)('includes a standard root on %s', async (source) => {
     const f = await fixture();
-    await f.load({ enabled: true }).inertia;
+    await f.load({ enabled: true, systemPromptSection: true }).inertia;
     const agent = f.agent();
     await agent.created(source);
     expect(await agent.guidance()).toEqual([expectedSection]);
@@ -114,7 +114,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     { delegationDepth: 3 },
   ])('excludes durable child metadata even when resumed as a live root: %j', async (metadata) => {
     const f = await fixture();
-    await f.load({ enabled: true }).inertia;
+    await f.load({ enabled: true, systemPromptSection: true }).inertia;
     const agent = f.agent({ agentPreset: 'standard', ...metadata });
     await agent.created('resume');
     expect(await agent.guidance()).toEqual([]);
@@ -122,7 +122,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
   it('excludes a live child without durable child metadata', async () => {
     const f = await fixture();
-    await f.load({ enabled: true }).inertia;
+    await f.load({ enabled: true, systemPromptSection: true }).inertia;
     const parent = f.agent();
     await parent.created();
     const child = f.agent({ agentPreset: 'standard' }, { root: false });
@@ -134,7 +134,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
   it('does not confuse fork lineage or zero delegation depth with live parent ownership', async () => {
     const f = await fixture();
-    await f.load({ enabled: true }).inertia;
+    await f.load({ enabled: true, systemPromptSection: true }).inertia;
     const agent = f.agent({ agentPreset: 'standard', parentSession: 'seed-session', delegationDepth: 0 });
     await agent.created('resume');
     expect(await agent.guidance()).toEqual([expectedSection]);
@@ -142,7 +142,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
   it.each(['ptc', 'custom', 'Standard', 'standard-extra', undefined])('excludes nonmatching or absent preset %s', async (preset) => {
     const f = await fixture();
-    await f.load({ enabled: true }).inertia;
+    await f.load({ enabled: true, systemPromptSection: true }).inertia;
     const agent = f.agent(preset === undefined ? {} : { agentPreset: preset });
     await agent.created();
     expect(await agent.guidance()).toEqual([]);
@@ -150,7 +150,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
   it('prefers projected preset state over the durable header', async () => {
     const f = await fixture();
-    await f.load({ enabled: true }).inertia;
+    await f.load({ enabled: true, systemPromptSection: true }).inertia;
     const included = f.agent({ agentPreset: 'ptc' }, { projectedPreset: 'standard' });
     const excluded = f.agent({ agentPreset: 'standard' }, { projectedPreset: 'ptc' });
     await included.created('resume');
@@ -162,7 +162,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
   it('honors explicit preset IDs and an empty allowlist', async () => {
     const f = await fixture();
-    const first = f.load({ enabled: true, presetIds: ['custom'] });
+    const first = f.load({ enabled: true, systemPromptSection: true, presetIds: ['custom'] });
     await first.inertia;
     const custom = f.agent({ agentPreset: 'custom' });
     const standard = f.agent();
@@ -171,7 +171,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     expect(await custom.guidance()).toEqual([expectedSection]);
     expect(await standard.guidance()).toEqual([]);
     await first.dispose();
-    await f.load({ enabled: true, presetIds: [] }).inertia;
+    await f.load({ enabled: true, systemPromptSection: true, presetIds: [] }).inertia;
     const untargeted = f.agent();
     await untargeted.created();
     expect(await untargeted.guidance()).toEqual([]);
@@ -179,7 +179,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
   it('registers only once when the same agent event is delivered twice', async () => {
     const f = await fixture();
-    await f.load({ enabled: true }).inertia;
+    await f.load({ enabled: true, systemPromptSection: true }).inertia;
     const changes = vi.fn();
     f.ctx.on('system-prompt/change', changes);
     const agent = f.agent();
@@ -191,7 +191,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
   it('never registers globally or leaks into an unrelated scope', async () => {
     const f = await fixture();
-    await f.load({ enabled: true }).inertia;
+    await f.load({ enabled: true, systemPromptSection: true }).inertia;
     const targeted = f.agent();
     const unrelated = f.agent({ agentPreset: 'ptc' });
     await targeted.created();
@@ -209,7 +209,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     await eligible.created();
     await ineligible.created();
     await child.created();
-    await f.load({ enabled: true }).inertia;
+    await f.load({ enabled: true, systemPromptSection: true }).inertia;
     expect(await eligible.guidance()).toEqual([expectedSection]);
     expect(await ineligible.guidance()).toEqual([]);
     expect(await child.guidance()).toEqual([]);
@@ -235,23 +235,74 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     expect(agent.inject).not.toHaveBeenCalled();
   });
 
-  it('defaults to the system section only; both switches can be combined', async () => {
+  it('defaults to context only; both switches can be combined', async () => {
     const dflt = await fixture();
     const a = dflt.agent();
     await a.created();
     await dflt.load({ enabled: true }).inertia;
-    expect(await a.guidance()).toEqual([expectedSection]);
-    expect((await a.preStep()).messages).toHaveLength(0);
+    expect(renderPrompt(await a.assemble())).toBe('');
+    expect((await a.preStep()).messages).toHaveLength(1);
 
     const both = await fixture();
     const b = both.agent();
     await b.created();
-    await both.load({ enabled: true, contextReminder: true }).inertia;
+    await both.load({ enabled: true, systemPromptSection: true, contextReminder: true }).inertia;
     expect(await b.guidance()).toEqual([expectedSection]);
     expect((await b.preStep()).messages).toHaveLength(1);
   });
 
-  it('systemPromptSection:false keeps the reminder but registers no system section', async () => {
+  it.each([
+    { header: { agentPreset: 'standard', origin: 'subagent' as const }, root: true },
+    { header: { agentPreset: 'standard', delegationDepth: 2 }, root: true },
+    { header: { agentPreset: 'standard' }, root: false },
+    { header: { agentPreset: 'ptc' }, root: true },
+    { header: { agentPreset: 'minimal' }, root: true },
+    { header: { agentPreset: 'creator' }, root: true },
+    { header: { agentPreset: 'custom' }, root: true },
+    { header: {}, root: true },
+  ])('reminds every agent independently of system eligibility: %j', async ({ header, root }) => {
+    const f = await fixture();
+    await f.load({ enabled: true, systemPromptSection: true }).inertia;
+    const agent = f.agent(header, { root });
+    await agent.created('resume');
+    expect(await agent.guidance()).toEqual([]);
+    expect((await agent.preStep()).messages).toHaveLength(1);
+    expect((await agent.preStep(2)).messages).toHaveLength(0);
+  });
+
+  it('reminds preexisting live children without requiring an agent/created replay or preset allowlist', async () => {
+    const f = await fixture();
+    const child = f.agent({}, { root: false });
+    await f.load({ enabled: true, presetIds: [] }).inertia;
+    expect((await child.preStep()).messages).toHaveLength(1);
+    expect((await child.preStep(2)).messages).toHaveLength(0);
+  });
+
+  it('does not repeat an inherited reminder for a child across plugin reloads', async () => {
+    const f = await fixture();
+    const events: Array<Record<string, unknown>> = [];
+    const child = f.agent({ origin: 'subagent' }, { root: false, sessionEvents: events });
+    const first = f.load({ enabled: true });
+    await first.inertia;
+    const reminder = (await child.preStep()).messages[0]!;
+    events.push({ type: 'user/message', data: reminder });
+    await first.dispose();
+    await f.load({ enabled: true }).inertia;
+    expect((await child.preStep()).messages).toHaveLength(0);
+    const inherited = f.agent({ origin: 'subagent' }, { root: false, sessionEvents: events });
+    expect((await inherited.preStep()).messages).toHaveLength(0);
+  });
+
+  it('injects nothing with both channels disabled', async () => {
+    const f = await fixture();
+    await f.load({ enabled: true, contextReminder: false, systemPromptSection: false }).inertia;
+    const agent = f.agent();
+    await agent.created();
+    expect(renderPrompt(await agent.assemble())).toBe('');
+    expect((await agent.preStep()).messages).toHaveLength(0);
+  });
+
+  it('systemPromptSection:false keeps the reminder but renders no system section', async () => {
     const f = await fixture();
     const agent = f.agent();
     await agent.created();
@@ -265,7 +316,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     const disabled = await fixture();
     const off = disabled.agent();
     await off.created();
-    await disabled.load({ enabled: true }).inertia;
+    await disabled.load({ enabled: true, systemPromptSection: true, contextReminder: false }).inertia;
     expect((await off.preStep()).messages).toHaveLength(0);
 
     const marked = await fixture();
@@ -290,7 +341,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     const f = await fixture();
     const existing = f.agent();
     await existing.created();
-    const fiber = f.load({ enabled: true });
+    const fiber = f.load({ enabled: true, systemPromptSection: true });
     await fiber.inertia;
     expect(await existing.guidance()).toEqual([expectedSection]);
     // A replayed agent/created after catch-up must not duplicate the section.
@@ -304,7 +355,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
   it('unloading the plugin removes actual sections while agent scopes stay alive', async () => {
     const f = await fixture();
-    const fiber = f.load({ enabled: true });
+    const fiber = f.load({ enabled: true, systemPromptSection: true });
     await fiber.inertia;
     const agents = [f.agent(), f.agent()];
     for (const agent of agents) {
@@ -324,7 +375,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
   it('agent scope disposal removes its section without affecting another agent', async () => {
     const f = await fixture();
-    const fiber = f.load({ enabled: true });
+    const fiber = f.load({ enabled: true, systemPromptSection: true });
     await fiber.inertia;
     const first = f.agent();
     const second = f.agent();
@@ -340,7 +391,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 
   it('keeps identical static prompt bytes across assemblies, agents and reloads', async () => {
     const f = await fixture();
-    const config = { enabled: true, presetIds: ['standard'] };
+    const config = { enabled: true, systemPromptSection: true, presetIds: ['standard'] };
     const fiber = f.load(config);
     await fiber.inertia;
     const first = f.agent();

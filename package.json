@@ -1,6 +1,6 @@
 {
   "name": "dsh-parallel-tools-prompt",
-  "version": "0.2.1-rc.3",
+  "version": "0.2.1-rc.5",
   "description": "Plan ready tool-call batches to reduce model round trips in DeepSeek Harness",
   "repository": {
     "type": "git",

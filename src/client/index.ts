@@ -16,18 +16,18 @@ const LOCALE = 'settings.parallelToolsPrompt';
 
 const en = {
   systemPrompt: 'Inject into system prompt',
-  systemPromptHint: 'Static guidance section in the system prompt (default on). Applies to sessions that assemble their prompt after the change.',
+  systemPromptHint: 'Static guidance section for eligible root agents in the system prompt (default off). Applies to sessions that assemble their prompt after the change.',
   context: 'Inject as context message',
-  contextHint: 'One-time CONTEXT message delivered at the next step, kept in the session history.',
+  contextHint: 'One-time CONTEXT message for all agents, including subagents (default on), delivered at the next step and kept in session history.',
   note: 'Both can be on together; with both off the plugin injects nothing.',
   unavailable: 'The plugin is not loaded or its settings are not served, so it cannot be configured right now.',
   readOnly: 'This deployment stores settings read-only.',
 };
 const zh = {
   systemPrompt: '注入到系统提示词',
-  systemPromptHint: '在系统提示词中加入固定的调度指引（默认开启）。对修改之后重新组装提示词的会话生效。',
+  systemPromptHint: '为符合范围的根 Agent 在系统提示词中加入固定的调度指引（默认关闭）。对修改之后重新组装提示词的会话生效。',
   context: '以 CONTEXT 消息注入',
-  contextHint: '在下一步骤送达一条 CONTEXT 消息，并保留在会话历史中。',
+  contextHint: '默认开启，对所有 Agent（包括子代理）生效；在下一步骤送达一次 CONTEXT 消息，并保留在会话历史中。',
   note: '两者可同时开启；都关闭时插件不注入任何内容。',
   unavailable: '插件未加载或其设置未提供，暂时无法配置。',
   readOnly: '本部署的设置为只读。',
@@ -64,12 +64,12 @@ function Card(props: CardProps): unknown {
     children: [
       Row({
         title: t('systemPrompt'), hint: t('systemPromptHint'), disabled,
-        checked: values['systemPromptSection'] !== false,
+        checked: values['systemPromptSection'] === true,
         onChange: checked => props.setField('systemPromptSection', checked),
       }),
       Row({
         title: t('context'), hint: t('contextHint'), disabled,
-        checked: values['contextReminder'] === true,
+        checked: values['contextReminder'] !== false,
         onChange: checked => props.setField('contextReminder', checked),
       }),
       jsx('div', { style: hintStyle, children: disabled ? t('readOnly') : t('note') }),

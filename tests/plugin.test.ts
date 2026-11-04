@@ -411,6 +411,20 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
   });
 });
 
+describe('shared dependency-aware scheduling rule', () => {
+  it('uses the same rule in both independently enabled injection channels', () => {
+    expect(plugin.CONTEXT_REMINDER).toBe(plugin.BATCH_RULE);
+    expect(plugin.PARALLEL_TOOLS_PROMPT).toBe(`Tool-call scheduling: ${plugin.BATCH_RULE}`);
+    for (const requirement of [
+      'dependency DAG', 'prerequisites are satisfied', 'inputs are known',
+      'independent tool calls together in one response', 'tool/output limits',
+      'whether or how', 'shared state', 'read-before-edit',
+      'After results arrive, reassess', 'completed or running work',
+      'never invent work', 'preserve required plan, todo, and approval workflows',
+    ]) expect(plugin.BATCH_RULE).toContain(requirement);
+  });
+});
+
 describe('skill distribution', () => {
   it('keeps the SKILL.md description identical to the shared rule and within spec limits', async () => {
     const { readFileSync } = await import('node:fs');

@@ -1,17 +1,17 @@
 ---
 name: batch-tool-calls
-description: "Before every response that uses tools, (1) list what the current subgoal already has ready, (2) issue ALL ready, independent calls together in one response (parallel reads, searches, checks), (3) split only for real dependencies (needs an earlier result, read-before-edit, shared-file or approval order). One call per response wastes a model round trip; a single call is fine when nothing else is ready, so never invent calls to fill a batch. No planning-only turn, no shell wrappers or delegation to simulate batching."
+description: "Treat the current subgoal as a dependency DAG: tool calls are nodes; required results, conditions, approvals, and state ordering are edges. Before calling tools, identify useful calls whose prerequisites are satisfied and inputs are known. Issue all ready, independent tool calls together in one response, within tool/output limits, to reduce model round trips and enable parallel execution where supported. Gather independent evidence together even if a later decision needs all of it. Wait if an earlier result determines whether or how a call runs, or if calls could conflict through shared state (including read-before-edit). After results arrive, reassess what is ready; do not repeat completed or running work. A single call is correct when nothing else is ready; never invent work to fill a batch. Use available tools as intended, not shell wrappers or delegation solely to simulate batching. No extra turn or printed DAG solely for scheduling; preserve required plan, todo, and approval workflows."
 ---
 
 # Batch ready tool calls
 
-Each response is one model round trip. Issuing ready work one call at a time spends one round trip per call.
+Think in dependencies across the current subgoal, not just the next action. The DAG is a mental model, not a graph you must print or execute with a new tool.
 
-Before each response:
+1. Identify useful calls whose prerequisites are satisfied and arguments are known.
+2. Issue ready, independent calls together, respecting tool/output limits and shared-state ordering.
+3. Wait when a result determines whether or how another call should run. After results arrive, reassess the ready set without duplicating completed or running work.
+4. Do not invent work or add a scheduling-only round. Required planning, todo, and approval workflows still apply.
 
-1. Check what else the current subgoal already has ready: same-tool calls on different targets, parallel reads, independent searches and checks.
-2. Issue every ready, independent call together in this one response.
-3. Hold a call only for real dependencies: its arguments need an earlier result, read-before-edit, shared-file or approval ordering.
-4. A single call is fine when nothing else is ready. Never invent calls to fill a batch.
+For example, read independent files A and B together, then make the decision that needs both. If a search must discover B's path, search first rather than guessing it. Keep conflicting edits ordered; independent evidence gathering need not wait for the final decision.
 
-Plan the next batch after the results return; do not add a separate planning round.
+Batching reduces model round trips and allows concurrency where the host supports it; it does not override the host scheduler or guarantee a speedup.

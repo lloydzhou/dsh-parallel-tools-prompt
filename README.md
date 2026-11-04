@@ -12,12 +12,13 @@
 - 同一 Agent 幂等注册；插件卸载与 Agent 释放都清理 section。插件重载时为仍存活的目标根 Agent 补挂已启用的 section，并覆盖仍存活 Agent 的提醒通道；源码更新建议重启宿主加载新模块。
 - 两个独立开关选择注入通道（默认只走 CONTEXT 提醒）：`contextReminder`（默认 `true`）与 `systemPromptSection`（默认 `false`，设为 `true` 输出 `systemPrompt.section()` 的指引内容）。提醒通过 `agent/pre-step` 在下一步骤追加一条带独立 `source.kind: parallel-tools-scheduling` 的 CONTEXT 消息，写入会话历史并渲染为 CONTEXT 块，与宿主 `time-context` 同一机制；已持久化的 source 用于去重，包括继承历史中的提醒，每个 Agent 最多交付一次，已有或继承的提醒不会重复注入。两者可同时开启；同时关闭则插件不注入任何内容。提醒进入历史，卸载不会删除。这不是每轮重复提醒，也不保证长期遵循。
 - 插件详情页（Plugins → 本插件）在描述与组件列表之间提供这两个开关的设置表单，开关即时写入当前 profile 的 patch。两个字段声明为 `.volatile()`，修改不重启插件：`contextReminder` 在下一步骤生效；系统提示词开关对修改之后重新组装提示词的会话生效（已建立的会话沿用旧提示词）。浏览器端由 `src/client` 经 `scripts/build-client.mjs` 构建为 `lib/client.js`，按宿主客户端模块格式封装；表单要求 profile 里条目 id 为 `parallel-tools-prompt`。
-- 单次调用合理时仍单次；路径、ID等参数必须已知；读后写、共享文件冲突、权限审批保持依赖顺序。不发明batch工具或额外规划轮次。
+- 两个注入通道共用同一条 DAG 调度规则：工具调用是节点，前置结果、执行条件、审批与共享状态顺序是边。围绕当前子目标识别已满足前置条件且参数已知的有用调用，在工具/输出限制内同轮发出互不依赖的调用；结果返回后重新判断就绪集合，不重复已完成或仍在运行的工作。独立证据可一起收集，即使后续决策需要汇总它们。
+- DAG 仅是内部调度模型，不要求画图、逐轮列计划或添加调度专用轮次；正常的计划、todo 和审批流程仍须遵守。只有一个就绪调用时就单次执行，不凑调用；读后写、共享状态冲突以及由前序结果决定是否/如何执行的操作仍保持顺序。
 - 同轮多个工具调用不代表真正同时执行；执行并发仍由DSH调度器决定。
 
 ## 版本、依赖与发布
 
-插件版本 `0.2.1-rc.5` 跟随 DSH 的 `0.2.1` 版本线，RC 序号独立递增，不等于宿主 RC 序号。最低宿主要求 `>=0.2.1-rc.3`，Node.js `>=24.9.0`。开发锁文件以 RC.5 为基线；RC.3 的相关接口已做源码比对，完整插件测试本次运行在 RC.5 依赖上，不冒充两套运行验收。
+插件版本 `0.2.1-rc.6` 跟随 DSH 的 `0.2.1` 版本线，RC 序号独立递增，不等于宿主 RC 序号。最低宿主要求 `>=0.2.1-rc.3`，Node.js `>=24.9.0`。开发锁文件以 RC.5 为基线；RC.3 的相关接口已做源码比对，完整插件测试本次运行在 RC.5 依赖上，不冒充两套运行验收。
 
 宿主库以 peerDependencies 声明，同时列入 devDependencies 供构建测试：Cordis `4.0.5`、Schemastery `3.18.5`、DSH agent/llm/preset-registry/session-projection/system-prompt 使用 `^0.2.1-rc.3`。不将宿主服务打包为普通运行依赖，避免重复服务身份。semver caret 不跨 `0.3`，也不自动接纳不同版本号的预发布版本。
 
@@ -61,6 +62,8 @@ presetIds: [standard]       # 默认；只筛选系统提示词通道的目标�
 ## 参考与验证边界
 
 主要借鉴 [bash-agent #99](https://github.com/lloydzhou/bash-agent/issues/99) 的就绪批次思路及 [#100](https://github.com/lloydzhou/bash-agent/issues/100) 对实测/离线估算的讨论；同时参考 [Anthropic并行调用指南](https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use)、[LLMCompiler](https://github.com/SqueezeAILab/LLMCompiler) 和 [Superpowers并行委派skill](https://github.com/obra/superpowers/blob/main/skills/dispatching-parallel-agents/SKILL.md)。本插件提示词为针对DSH自行编写的简短文本，不移植其执行器或照搬专用工具调用格式。
+
+提示词取舍：参考 [bash-agent 的系统提示词基准](https://github.com/lloydzhou/bash-agent/blob/main/tests/fixtures/system_prompt_expected.txt) 中“围绕当前子目标前瞻、独立证据一起收集、是否/如何执行由前序结果决定时等待、不凑调用”；借鉴 [LLMCompiler planner](https://github.com/SqueezeAILab/LLMCompiler/blob/main/src/llm_compiler/planner.py) 的动作输入依赖模型，但不引入其计划 DSL、`$id` 或 `join` 工具；采用 Superpowers 的共享状态隔离边界，而不是要求为普通工具调用创建子代理。Anthropic 指南也明确同轮调用的实际并发与执行顺序由宿主决定。
 
 LLMCompiler收益来自框架与调度；bash-agent历史DAG合并收益是离线估算；这些都不是本插件的实测收益。生命周期测试只证明接入/清理正确，不证明模型更快、更省。
 

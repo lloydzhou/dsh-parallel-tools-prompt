@@ -6,16 +6,13 @@ import type {} from '@deepseek-ai/dsh-system-prompt';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import z from '@deepseek-ai/schemastery';
 import type { Volatile } from '@deepseek-ai/cordis';
-import { PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from './prompt.js';
+import { CONTEXT_REMINDER, PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from './prompt.js';
 import { installPromptDebug } from './debug.js';
 
-export { BATCH_RULE, PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from './prompt.js';
+export { BATCH_RULE, CONTEXT_REMINDER, PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from './prompt.js';
 
 export const name = 'parallel-tools-prompt';
 export const inject = ['agents', 'systemPrompt', 'sessionProjections'];
-
-/** Model-facing text of the optional context-channel reminder. */
-export const CONTEXT_REMINDER = 'Every response: before answering, check what else the current subgoal already has ready and issue ALL ready, independent tool calls together in this one response — same-tool calls on different targets, parallel reads, independent searches and checks. Each response is one model round trip; issuing ready work one call at a time spends one round trip per call. Hold a call only for real dependencies: its arguments need an earlier result, read-before-edit, shared-file or approval ordering. A single call is fine when nothing else is ready; never invent calls to fill a batch.';
 
 /** Source kind of the reminder message; the host renders unknown context kinds as CONTEXT blocks. */
 export const CONTEXT_SOURCE_KIND = 'parallel-tools-scheduling';

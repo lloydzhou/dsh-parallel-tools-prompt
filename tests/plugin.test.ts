@@ -23,15 +23,13 @@ type Header = {
 async function fixture() {
   const ctx = new Context();
   cleanups.push(() => ctx.fiber.dispose());
-  const roots: Agent[] = [];
+  const live: Agent[] = [];
   const projectedPresets = new Map<Agent['session'], string>();
-  const rootsOf = vi.fn(() => [...roots]);
-  const stateOf = vi.fn((session: Agent['session'], key: string) => {
-    expect(key).toBe('agentPreset');
-    return projectedPresets.get(session);
-  });
-  ctx.provide('agents', { roots: rootsOf });
-  ctx.provide('sessionProjections', { stateOf });
+  const list = vi.fn(() => [...live]);
+  const presetForSession = vi.fn((session: Agent['session']) => projectedPresets.get(session) ?? null);
+  ctx.provide('agents', { list });
+  ctx.provide('agentPresets', { presetForSession });
+  ctx.provide('sessionProjections', { register: vi.fn(async () => ({ stateOf: () => void 0 })) });
   const promptFiber = ctx.plugin(SystemPrompt, { includeHarnessIdentity: false });
   await promptFiber.inertia;
   // Like the real Agent host, the scope minter declares the services its
@@ -53,7 +51,7 @@ async function fixture() {
       session: { header, snapshotEvents: () => options.sessionEvents ?? [] },
       inject,
     } as unknown as Agent;
-    if (options.root !== false) roots.push(value);
+    if (options.root !== false) live.push(value);
     if (options.projectedPreset !== undefined) projectedPresets.set(value.session, options.projectedPreset);
     return {
       value,
@@ -73,11 +71,12 @@ async function fixture() {
         .filter((section) => section.name === plugin.SECTION_NAME),
     };
   }
-  return { ctx, rootsOf, stateOf, load, agent };
+  return { ctx, list, presetForSession, load, agent };
 }
 
 const expectedSection = {
   name: plugin.SECTION_NAME,
+  order: plugin.SECTION_ORDER,
   text: plugin.PARALLEL_TOOLS_PROMPT,
   interpolate: false,
 };
@@ -87,15 +86,15 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     const f = await fixture();
     const fiber = f.load(config);
     await fiber.inertia;
-    expect(fiber.config.enabled).toBe(false);
-    expect(fiber.config.debugEnabled).toBe(false);
-    expect(fiber.config.debugSessionId).toBe('');
-    expect(fiber.config.debugMaxCalls).toBe(3);
+    expect((fiber as any)._effectiveConfig.enabled).toBe(false);
+    expect((fiber as any)._effectiveConfig.debugEnabled).toBe(false);
+    expect((fiber as any)._effectiveConfig.debugSessionId).toBe('');
+    expect((fiber as any)._effectiveConfig.debugMaxCalls).toBe(3);
     const agent = f.agent();
     await agent.created();
     expect(await agent.guidance()).toEqual([]);
-    expect(f.rootsOf).not.toHaveBeenCalled();
-    expect(f.stateOf).not.toHaveBeenCalled();
+    expect(f.list).not.toHaveBeenCalled();
+    expect(f.presetForSession).not.toHaveBeenCalled();
     expect(renderPrompt(await f.ctx.systemPrompt.assemble())).toBe('');
   });
 
@@ -129,7 +128,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     await child.created();
     expect(await parent.guidance()).toEqual([expectedSection]);
     expect(await child.guidance()).toEqual([]);
-    expect(f.rootsOf).toHaveBeenCalled();
+    expect(f.list).toHaveBeenCalled();
   });
 
   it('does not confuse fork lineage or zero delegation depth with live parent ownership', async () => {
@@ -157,7 +156,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     await excluded.created('resume');
     expect(await included.guidance()).toEqual([expectedSection]);
     expect(await excluded.guidance()).toEqual([]);
-    expect(f.stateOf).toHaveBeenCalledWith(included.value.session, 'agentPreset');
+    expect(f.presetForSession).toHaveBeenCalledWith(included.value.session);
   });
 
   it('honors explicit preset IDs and an empty allowlist', async () => {

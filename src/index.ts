@@ -1,7 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type {} from '@deepseek-ai/dsh-agent-preset-registry';
-import type {} from '@deepseek-ai/dsh-session-projection';
 import type {} from '@deepseek-ai/dsh-system-prompt';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import z from '@deepseek-ai/schemastery';
@@ -12,7 +11,7 @@ import { installPromptDebug } from './debug.js';
 export { BATCH_RULE, CONTEXT_REMINDER, PARALLEL_TOOLS_PROMPT, SECTION_NAME, SECTION_ORDER } from './prompt.js';
 
 export const name = 'parallel-tools-prompt';
-export const inject = ['agents', 'systemPrompt', 'sessionProjections'];
+export const inject = ['agents', 'systemPrompt', 'agentPresets'];
 
 /** Source kind of the reminder message; the host renders unknown context kinds as CONTEXT blocks. */
 export const CONTEXT_SOURCE_KIND = 'parallel-tools-scheduling';
@@ -68,13 +67,15 @@ type Registration = { release?: () => void | Promise<void> };
 function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<string>, registrations: WeakMap<Agent, Registration>, active: Set<Registration>): void {
   if (registrations.has(agent)) return;
   const { header } = agent.session;
-  // Durable child metadata survives resume; live ownership covers children
-  // without that metadata. parentSession is fork lineage, NOT a parent Agent.
+  // Durable child metadata survives resume; every delegated child carries
+  // origin/delegationDepth, so this also covers runtime ownership. parentSession
+  // is fork lineage, NOT a parent Agent.
   if (header.origin === 'subagent' || (header.delegationDepth ?? 0) > 0) return;
-  if (!ctx.agents.roots().includes(agent)) return;
-  const preset = ctx.sessionProjections.stateOf(agent.session, 'agentPreset')
+  // Live check only: list() still drops agents whose registration detached.
+  if (!ctx.agents.list().includes(agent)) return;
+  const preset = ctx.agentPresets.presetForSession(agent.session)
     ?? header.agentPreset;
-  if (preset === undefined || !presetIds.has(preset)) return;
+  if (preset == null || !presetIds.has(preset)) return;
 
   const registration: Registration = {};
   // Returning the disposer is essential: ctx.effect does not implicitly adopt
@@ -155,7 +156,7 @@ export function apply(ctx: Context, config: Config): void {
     // Runs once at apply/reload time: re-attach to agents that survived the
     // previous instance's disposal. The no-op disposer satisfies the effect
     // contract; per-agent cleanup is owned by each registration instead.
-    for (const agent of ctx.agents.roots()) attach(ctx, agent, config, presetIds, registrations, active);
+    for (const agent of ctx.agents.list()) attach(ctx, agent, config, presetIds, registrations, active);
     return () => {};
   });
 }

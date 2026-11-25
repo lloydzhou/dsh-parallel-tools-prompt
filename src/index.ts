@@ -56,6 +56,31 @@ function flag(value: boolean | Volatile<boolean>): boolean {
   return typeof value === 'boolean' ? value : value.get();
 }
 
+/**
+ * Read the live agent registry across host generations. The registry API moved
+ * from `roots()` (dsh-agent <= 0.2.3-alpha.1) to `list()` (since
+ * 0.2.3-alpha.2); calling a removed method crashes the plugin with
+ * "ctx.agents.roots is not a function or its return value is not iterable".
+ * Probe both names and fail soft with an empty roster, so any future rename
+ * degrades to "no guidance attached" instead of a hard plugin error.
+ */
+function liveAgents(ctx: Context): readonly Agent[] {
+  const registry = ctx.agents as { list?: () => Agent[]; roots?: () => Agent[] };
+  if (typeof registry.list === 'function') return registry.list();
+  if (typeof registry.roots === 'function') return registry.roots();
+  return [];
+}
+
+/**
+ * Defensive projected-preset lookup: `presetForSession` shipped alongside the
+ * registry rename in 0.2.3-alpha.2. On hosts where the service exists without
+ * the method, fall back to the durable session header instead of throwing.
+ */
+function projectedPreset(ctx: Context, session: Agent['session']): string | null {
+  const presets = ctx.agentPresets as { presetForSession?: (session: Agent['session']) => string | null };
+  return typeof presets.presetForSession === 'function' ? presets.presetForSession(session) : null;
+}
+
 type Registration = { release?: () => void | Promise<void> };
 
 /**
@@ -71,9 +96,9 @@ function attach(ctx: Context, agent: Agent, config: Config, presetIds: Set<strin
   // origin/delegationDepth, so this also covers runtime ownership. parentSession
   // is fork lineage, NOT a parent Agent.
   if (header.origin === 'subagent' || (header.delegationDepth ?? 0) > 0) return;
-  // Live check only: list() still drops agents whose registration detached.
-  if (!ctx.agents.list().includes(agent)) return;
-  const preset = ctx.agentPresets.presetForSession(agent.session)
+  // Live check only: the registry lookup still drops agents whose registration detached.
+  if (!liveAgents(ctx).includes(agent)) return;
+  const preset = projectedPreset(ctx, agent.session)
     ?? header.agentPreset;
   if (preset == null || !presetIds.has(preset)) return;
 
@@ -156,7 +181,7 @@ export function apply(ctx: Context, config: Config): void {
     // Runs once at apply/reload time: re-attach to agents that survived the
     // previous instance's disposal. The no-op disposer satisfies the effect
     // contract; per-agent cleanup is owned by each registration instead.
-    for (const agent of ctx.agents.list()) attach(ctx, agent, config, presetIds, registrations, active);
+    for (const agent of liveAgents(ctx)) attach(ctx, agent, config, presetIds, registrations, active);
     return () => {};
   });
 }

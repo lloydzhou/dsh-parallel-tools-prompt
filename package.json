@@ -1,6 +1,6 @@
 {
   "name": "dsh-parallel-tools-prompt",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Plan ready tool-call batches to reduce model round trips in DeepSeek Harness",
   "repository": {
     "type": "git",
@@ -22,9 +22,10 @@
     },
     "./client": "./lib/client.js",
     "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
-  "files": ["lib", "locale", "cordis.patch.yml", "README.md", "LICENSE", "skills", "scripts/analyze-session.mjs"],
+  "files": ["lib", "locale", "icon.svg", "cordis.patch.yml", "README.md", "LICENSE", "skills", "scripts/analyze-session.mjs"],
   "engines": {
     "node": ">=24.9.0",
     "dsh": ">=0.2.3-alpha.2"

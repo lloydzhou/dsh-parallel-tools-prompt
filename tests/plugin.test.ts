@@ -19,15 +19,18 @@ type Header = {
 
 /** Only the Agent/session facade and two public registry methods are fake.
  * Prompt registration, scoped assembly, event dispatch and effect ownership are real.
+ * `registry` picks the host generation under test: 'list' (0.2.3-alpha.2+),
+ * 'roots' (<= 0.2.3-alpha.1), or 'empty' (neither method exposed).
  */
-async function fixture() {
+async function fixture(registry: 'list' | 'roots' | 'empty' = 'list') {
   const ctx = new Context();
   cleanups.push(() => ctx.fiber.dispose());
   const live: Agent[] = [];
   const projectedPresets = new Map<Agent['session'], string>();
   const list = vi.fn(() => [...live]);
+  const roots = vi.fn(() => [...live]);
+  ctx.provide('agents', registry === 'list' ? { list } : registry === 'roots' ? { roots } : {});
   const presetForSession = vi.fn((session: Agent['session']) => projectedPresets.get(session) ?? null);
-  ctx.provide('agents', { list });
   ctx.provide('agentPresets', { presetForSession });
   ctx.provide('sessionProjections', { register: vi.fn(async () => ({ stateOf: () => void 0 })) });
   const promptFiber = ctx.plugin(SystemPrompt, { includeHarnessIdentity: false });
@@ -71,7 +74,7 @@ async function fixture() {
         .filter((section) => section.name === plugin.SECTION_NAME),
     };
   }
-  return { ctx, list, presetForSession, load, agent };
+  return { ctx, list, roots, presetForSession, load, agent };
 }
 
 const expectedSection = {
@@ -215,6 +218,25 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     const fresh = f.agent();
     await fresh.created();
     expect(await fresh.guidance()).toEqual([expectedSection]);
+  });
+
+  it.each(['roots', 'empty'] as const)('survives a legacy %j agent registry without crashing', async (registry) => {
+    const f = await fixture(registry);
+    const fiber = f.load({ enabled: true, systemPromptSection: true, contextReminder: true });
+    await fiber.inertia;
+    const agent = f.agent();
+    await agent.created('resume');
+    if (registry === 'roots') {
+      // dsh-agent <= 0.2.3-alpha.1 exposes roots() only; probing must prefer it.
+      expect(f.list).not.toHaveBeenCalled();
+      expect(f.roots).toHaveBeenCalled();
+      expect(await agent.guidance()).toEqual([expectedSection]);
+    } else {
+      // Fail soft: an unknown registry API degrades to no attached sections.
+      expect(await agent.guidance()).toEqual([]);
+    }
+    // The context reminder never touches the registry, so it still delivers.
+    expect((await agent.preStep()).messages).toHaveLength(1);
   });
 
   it('appends the reminder once via pre-step as a sourced context message', async () => {

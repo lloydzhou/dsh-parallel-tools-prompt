@@ -11,6 +11,8 @@ Before each tool-using response, silently list every call whose arguments you al
 
 A response with a single call is right only when every other call you would make next depends on that call's result.
 
+If you think in dependency graphs: this test picks out the current ready layer, the calls with no unmet dependency. Send that whole layer at once; you never need to plan the full graph.
+
 ## Batch these
 
 - **Opening reads and searches.** Starting a task that names `src/a.ts`, `src/b.ts` and a config file: read all three and run the search for the symbol in one response.

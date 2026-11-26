@@ -22,11 +22,41 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
-/** True when the session transcript already carries our sourced reminder. */
+type EventLike = { type?: string; data?: unknown } | undefined;
+type SurfaceSession = {
+  surface?: { readonly nodes: readonly number[]; readonly replaceGeneration: number };
+  eventAt?: (seq: number) => EventLike;
+  snapshotEvents: () => readonly EventLike[];
+};
+
+function isReminderEvent(event: EventLike): boolean {
+  return event?.type === 'user/message'
+    && (event.data as { source?: { kind?: string } } | undefined)?.source?.kind === CONTEXT_SOURCE_KIND;
+}
+
+/**
+ * True when the reminder is still model-visible. Reads the session surface
+ * (the projected history after compaction/pruning replacements), like the
+ * host's own agent-instructions plugin; the raw event log would still contain
+ * a reminder that compaction has already replaced with a summary. Hosts
+ * without a surface fall back to the full log.
+ */
 function hasReminder(agent: Agent): boolean {
-  return agent.session.snapshotEvents().some(event =>
-    event.type === 'user/message'
-    && (event.data as { source?: { kind?: string } } | undefined)?.source?.kind === CONTEXT_SOURCE_KIND);
+  const session = agent.session as unknown as SurfaceSession;
+  const { surface, eventAt } = session;
+  if (surface !== undefined && typeof eventAt === 'function') {
+    const nodes = surface.nodes;
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      if (isReminderEvent(eventAt.call(session, nodes[i]!))) return true;
+    }
+    return false;
+  }
+  return session.snapshotEvents().some(isReminderEvent);
+}
+
+/** Surface replacement counter; changes only on compaction/prune replacements. */
+function surfaceGeneration(agent: Agent): number {
+  return (agent.session as unknown as SurfaceSession).surface?.replaceGeneration ?? 0;
 }
 
 export const Config = z.object({
@@ -43,6 +73,10 @@ export const Config = z.object({
   contextReminder: z.boolean().default(true).volatile().description(
     'Inject a one-time scheduling reminder as a CONTEXT message for all agents, including subagents and all presets, at the next step boundary (default true). Persists in the session transcript; never duplicated across reloads. Independent of systemPromptSection and presetIds.',
   ),
+  contextExcludePresetIds: z.array(z.string().pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/))
+    .max(32).default(['ptc']).description(
+      'Exact preset IDs that never receive the CONTEXT reminder (default [ptc]: PTC exposes only run_code, whose root calls are exclusive; batching there belongs inside one program). Agents without a preset are always reminded.',
+    ),
   presetIds: z.array(z.string().pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/))
     .max(32).default(['standard']).description(
       'Exact preset IDs for the system-prompt channel only. Root agents only; use native-tool presets, not PTC. An empty list disables system-prompt targets, not context reminders.',
@@ -151,13 +185,27 @@ export function apply(ctx: Context, config: Config): void {
   // downstream listeners accept the step, append one sourced message to the
   // step's messages; the host persists it and renders it as a CONTEXT block.
   {
-    const delivered = new WeakSet<Agent>();
+    // Per agent: the surface replacement generation at which the reminder was
+    // last confirmed visible (or delivered). Unchanged generation means no
+    // compaction since, so the reminder is still visible and nothing is
+    // re-scanned. After a compaction the surface is checked once more and the
+    // reminder is re-delivered only if the replacement removed it.
+    const checked = new WeakMap<Agent, number>();
+    const excluded = new Set(config.contextExcludePresetIds);
     ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
       const decision = await next();
       if (decision.kind === 'reject' || signal.aborted) return decision;
-      if (!flag(config.contextReminder) || delivered.has(agent)) return decision;
+      if (!flag(config.contextReminder)) return decision;
+      // Checked every step (cheap), before the generation cache, so a session
+      // that later switches away from an excluded preset still gets reminded.
+      if (excluded.size > 0) {
+        const preset = projectedPreset(ctx, agent.session) ?? agent.session.header.agentPreset;
+        if (preset != null && excluded.has(preset)) return decision;
+      }
+      const generation = surfaceGeneration(agent);
+      if (checked.get(agent) === generation) return decision;
+      checked.set(agent, generation);
       const present = hasReminder(agent) || decision.messages.some(m => m.source.kind === CONTEXT_SOURCE_KIND);
-      delivered.add(agent);
       if (present) return decision;
       return {
         ...decision,

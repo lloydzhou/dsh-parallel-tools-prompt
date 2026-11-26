@@ -10,6 +10,28 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
+/** Minimal public surface model: `log` is the raw event log, `nodes` the model-visible seqs. */
+type FakeSurface = { log: Array<Record<string, unknown>>; nodes: number[]; replaceGeneration: number };
+
+function fakeSurface(): FakeSurface & {
+  append: (event: Record<string, unknown>) => void;
+  compact: (keep?: (seq: number) => boolean) => void;
+} {
+  const state: FakeSurface = { log: [], nodes: [], replaceGeneration: 0 };
+  return Object.assign(state, {
+    append(event: Record<string, unknown>) {
+      state.log.push(event);
+      state.nodes.push(state.log.length - 1);
+    },
+    // Replace every visible node not kept by one summary node, like a compaction checkpoint.
+    compact(keep: (seq: number) => boolean = () => false) {
+      state.log.push({ type: 'user/message', data: { source: { kind: 'compact-checkpoint' }, content: [] } });
+      state.nodes = [state.log.length - 1, ...state.nodes.filter(keep)];
+      state.replaceGeneration += 1;
+    },
+  });
+}
+
 type Header = {
   agentPreset?: string;
   origin?: 'subagent';
@@ -44,14 +66,24 @@ async function fixture(registry: 'list' | 'roots' | 'empty' = 'list') {
     return ctx.plugin(plugin, config);
   }
 
-  function agent(header: Header = { agentPreset: 'standard' }, options: { root?: boolean; projectedPreset?: string; sessionEvents?: Array<Record<string, unknown>> } = {}) {
+  function agent(header: Header = { agentPreset: 'standard' }, options: { root?: boolean; projectedPreset?: string; sessionEvents?: Array<Record<string, unknown>>; surface?: FakeSurface } = {}) {
     const key = {};
     const scope = createScope(agentHost.ctx, key);
     const inject = vi.fn();
     // Deliberately omit every private Agent/registry implementation detail.
+    // With `surface`, the session exposes the public surface/eventAt pair and
+    // the raw log; without it, only the legacy snapshotEvents() log.
+    const session = options.surface === undefined
+      ? { header, snapshotEvents: () => options.sessionEvents ?? [] }
+      : {
+        header,
+        surface: options.surface,
+        eventAt: (seq: number) => options.surface!.log[seq],
+        snapshotEvents: () => options.surface!.log,
+      };
     const value = {
       ctx: scope.ctx,
-      session: { header, snapshotEvents: () => options.sessionEvents ?? [] },
+      session,
       inject,
     } as unknown as Agent;
     if (options.root !== false) live.push(value);
@@ -251,7 +283,7 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     expect(message.source.kind).toBe(plugin.CONTEXT_SOURCE_KIND);
     expect(message.source.form).toBe('notice');
     expect(message.content[0]?.text).toBe(plugin.CONTEXT_REMINDER);
-    expect(message.content[0]?.text).toContain('independent tool calls together');
+    expect(message.content[0]?.text).toContain('send them all together');
     expect((await agent.preStep(2)).messages).toHaveLength(0);
     expect(agent.inject).not.toHaveBeenCalled();
   });
@@ -276,7 +308,6 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     { header: { agentPreset: 'standard', origin: 'subagent' as const }, root: true },
     { header: { agentPreset: 'standard', delegationDepth: 2 }, root: true },
     { header: { agentPreset: 'standard' }, root: false },
-    { header: { agentPreset: 'ptc' }, root: true },
     { header: { agentPreset: 'minimal' }, root: true },
     { header: { agentPreset: 'creator' }, root: true },
     { header: { agentPreset: 'custom' }, root: true },
@@ -312,6 +343,76 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
     expect((await child.preStep()).messages).toHaveLength(0);
     const inherited = f.agent({ origin: 'subagent' }, { root: false, sessionEvents: events });
     expect((await inherited.preStep()).messages).toHaveLength(0);
+  });
+
+  it('re-delivers once after a compaction removes the reminder from the visible surface', async () => {
+    const f = await fixture();
+    const surface = fakeSurface();
+    const agent = f.agent(undefined, { surface });
+    await f.load({ enabled: true }).inertia;
+    const first = (await agent.preStep()).messages;
+    expect(first).toHaveLength(1);
+    surface.append({ type: 'user/message', data: first[0] });
+    expect((await agent.preStep(2)).messages).toHaveLength(0);
+    // Compaction shadows the reminder: still in the raw log, no longer model-visible.
+    surface.compact();
+    const again = (await agent.preStep(3)).messages;
+    expect(again).toHaveLength(1);
+    expect(again[0]!.source.kind).toBe(plugin.CONTEXT_SOURCE_KIND);
+    surface.append({ type: 'user/message', data: again[0] });
+    // No further compaction: no repeat.
+    expect((await agent.preStep(4)).messages).toHaveLength(0);
+    expect((await agent.preStep(5)).messages).toHaveLength(0);
+  });
+
+  it('does not re-deliver when a compaction keeps the reminder visible', async () => {
+    const f = await fixture();
+    const surface = fakeSurface();
+    const agent = f.agent(undefined, { surface });
+    await f.load({ enabled: true }).inertia;
+    surface.append({ type: 'user/message', data: { source: { kind: 'user' }, content: [] } });
+    const reminder = (await agent.preStep()).messages[0]!;
+    surface.append({ type: 'user/message', data: reminder });
+    const reminderSeq = surface.log.length - 1;
+    surface.compact(seq => seq === reminderSeq);
+    expect((await agent.preStep(2)).messages).toHaveLength(0);
+  });
+
+  it('trusts the visible surface over the raw log for inherited reminders', async () => {
+    const f = await fixture();
+    const surface = fakeSurface();
+    surface.append({ type: 'user/message', data: { source: { kind: plugin.CONTEXT_SOURCE_KIND }, content: [] } });
+    surface.compact();
+    const agent = f.agent(undefined, { surface });
+    await f.load({ enabled: true }).inertia;
+    expect((await agent.preStep()).messages).toHaveLength(1);
+  });
+
+  it('skips PTC agents by default and honors an explicit exclusion list', async () => {
+    const f = await fixture();
+    await f.load({ enabled: true }).inertia;
+    const ptc = f.agent({ agentPreset: 'ptc' });
+    const child = f.agent({ agentPreset: 'ptc', origin: 'subagent' }, { root: false });
+    const none = f.agent({});
+    expect((await ptc.preStep()).messages).toHaveLength(0);
+    expect((await child.preStep()).messages).toHaveLength(0);
+    expect((await none.preStep()).messages).toHaveLength(1);
+
+    const custom = await fixture();
+    await custom.load({ enabled: true, contextExcludePresetIds: ['minimal'] }).inertia;
+    expect((await custom.agent({ agentPreset: 'ptc' }).preStep()).messages).toHaveLength(1);
+    expect((await custom.agent({ agentPreset: 'minimal' }).preStep()).messages).toHaveLength(0);
+  });
+
+  it('reminds a session once it switches away from an excluded preset', async () => {
+    const f = await fixture();
+    await f.load({ enabled: true }).inertia;
+    const header: Header = { agentPreset: 'ptc' };
+    const agent = f.agent(header);
+    expect((await agent.preStep()).messages).toHaveLength(0);
+    header.agentPreset = 'standard';
+    expect((await agent.preStep(2)).messages).toHaveLength(1);
+    expect((await agent.preStep(3)).messages).toHaveLength(0);
   });
 
   it('injects nothing with both channels disabled', async () => {
@@ -433,37 +534,39 @@ describe('parallel-tools prompt lifecycle with published Cordis services', () =>
 });
 
 describe('shared dependency-aware scheduling rule', () => {
-  it('uses the same rule in both independently enabled injection channels', () => {
-    expect(plugin.CONTEXT_REMINDER).toBe(plugin.BATCH_RULE);
+  it('uses the same rule in both channels; the history-backed one states that it persists', () => {
     expect(plugin.PARALLEL_TOOLS_PROMPT).toBe(`Tool-call scheduling: ${plugin.BATCH_RULE}`);
+    expect(plugin.CONTEXT_REMINDER).toBe(
+      `Tool-call scheduling (applies to every remaining step of this session): ${plugin.BATCH_RULE}`,
+    );
   });
 
-  it('starts with useful action discovery before internal dependency checking', () => {
+  it('opens with a silent, per-call readiness test and a bar for lone calls', () => {
     expect(plugin.BATCH_RULE.startsWith(
-      'Before calling tools, briefly check what other useful work can run now without these results.',
+      'Before each tool-using response, silently list every call whose arguments you already know and send them all together.',
     )).toBe(true);
     for (const requirement of [
-      'internal dependency DAG for the current subgoal', 'known inputs and prerequisites met',
-      'all ready, independent tool calls together in one response', 'tool/output limits',
-      'Gather independent evidence together even if later combined',
+      'could a pending result change whether I make it or what I pass? If not, include it now.',
+      'A lone call is right only when every other next call depends on its result.',
     ]) expect(plugin.BATCH_RULE).toContain(requirement);
   });
 
-  it('continues only independent, non-interfering background work and reassesses results', () => {
-    expect(plugin.BATCH_RULE).toContain(
-      'While background work runs, continue work independent of its results and non-interfering with its state.',
-    );
-    expect(plugin.BATCH_RULE).toContain('After results, reassess; never repeat running/completed work.');
+  it('names the commonly missed batches, including one result unlocking several calls', () => {
+    for (const requirement of [
+      "a task's opening reads and searches",
+      'every file or symbol one result points to (e.g. each frame of a stack trace)',
+      'edits to different files once their content is known',
+      'read-only checks like typecheck, lint and tests',
+    ]) expect(plugin.BATCH_RULE).toContain(requirement);
   });
 
-  it('allows valid serial work while preserving safety and scheduling guardrails', () => {
+  it('grounds waiting in concurrent execution and keeps safety guardrails', () => {
     for (const requirement of [
-      'Wait for results that decide whether or how to act, approvals, or shared-state ordering',
-      'read-before-edit', 'Real dependency chains and single calls are valid; never invent work',
-      'Use tools as intended, not shell wrappers or delegation to simulate batching',
-      'No printed DAG or extra scheduling turns',
-      'preserve required plan, todo, and approval workflows',
-      'Aim to reduce model round trips; actual concurrency depends on runtime',
+      'Calls in one response may run concurrently and in any order, so wait when a result decides the next call, approval is needed, or calls touch the same state',
+      'read before edit, edit before run, two edits to one file',
+      'no unrelated commands chained into one shell call, no subagents for quick calls, no speculative calls',
+      'While background work runs, do unrelated work; never poll or repeat running or finished calls.',
+      'Never skip required plan, todo or approval steps.',
     ]) expect(plugin.BATCH_RULE).toContain(requirement);
   });
 });
@@ -478,17 +581,19 @@ describe('skill distribution', () => {
     expect(plugin.PARALLEL_TOOLS_PROMPT.startsWith('Tool-call scheduling: ')).toBe(true);
   });
 
-  it('expands action discovery, non-interfering background work, and valid serial examples in the body', async () => {
+  it('expands the test, batch/wait examples, anti-faking and background rules in the body', async () => {
     const { readFileSync } = await import('node:fs');
     const text = readFileSync(new URL('../skills/batch-tool-calls/SKILL.md', import.meta.url), 'utf8');
     const body = text.split('\n---\n')[1]!;
     for (const requirement of [
-      'Before calling tools, briefly check what other useful work can run now without these results.',
-      'neither needs its results nor interferes with its state',
-      'do not busy-poll or duplicate running/completed calls or delegations',
-      'Real dependency chains and single calls are valid', 'test → failure → fix → retest',
-      'do not edit files those tests depend on or launch the same tests again',
-      'Actual concurrency depends on the runtime/host scheduler',
+      'could a pending result change whether I make this call, or what I pass to it?',
+      'A response with a single call is right only when every other call you would make next depends on that call',
+      'A stack trace names three files', 'read all of them together, not one per turn',
+      "a search must find a path before you read it; don't guess the path",
+      '`test → read failure → fix → retest` is a valid serial chain',
+      "Don't chain unrelated commands into one shell call", '(`build && test`) is fine',
+      "don't edit files the tests depend on", 'never repeat a call or delegation that is running or finished',
+      'Required plan, todo and approval workflows still apply.',
     ]) expect(body).toContain(requirement);
   });
 });

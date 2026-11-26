@@ -43,7 +43,7 @@
 
 ### 本次改进（当前源码已启用，效果未证实）
 
-当前源码（`0.2.4`，尚未发布）的改动，不表示已更新运行中的宿主或已证实有效：
+当前源码（`0.2.5`，尚未发布）的改动，不表示已更新运行中的宿主或已证实有效：
 
 - **规则重写**：用上文的逐条就绪检验替换原来的“先发现动作，再查依赖 DAG”措辞；两个通道和 skill 描述同步更新，skill 正文改为“合批 / 等待 / 不凑批 / 后台”四节，并给出正反例。
 - **CONTEXT 前缀**：系统提示词通道仍用 `Tool-call scheduling:`；CONTEXT 通道改为 `Tool-call scheduling (applies to every remaining step of this session):`，因为它只交付一次，需要说明对后续所有步骤有效。
@@ -54,7 +54,7 @@
 
 ## 版本、依赖与发布
 
-插件版本 `0.2.4` 独立编号，不等于宿主版本。最低宿主要求 `>=0.2.3-alpha.2`，Node.js `>=24.9.0`。插件测试运行在 `0.2.3-alpha.2` 宿主依赖上。
+插件版本 `0.2.5` 独立编号，不等于宿主版本。最低宿主要求 `>=0.2.3-alpha.2`，Node.js `>=24.9.0`。插件测试运行在 `0.2.3-alpha.2` 宿主依赖上。
 
 宿主库以 peerDependencies 声明，同时列入 devDependencies 供构建测试：Cordis `4.2.0-alpha.1`、Schemastery `3.20.0-alpha.1`、DSH agent/llm/agent-preset-registry/session-projection/system-prompt 均为 `0.2.3-alpha.2`。不将宿主服务打包为普通运行依赖，避免重复服务身份。peer 依赖是精确版本，宿主升级后需要同步调整。
 
